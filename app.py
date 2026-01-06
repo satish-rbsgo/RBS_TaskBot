@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="✅")
+st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
 
 # --- CONFIGURATION ---
 COMPANY_DOMAIN = "@rbsgo.com"
@@ -37,13 +37,16 @@ supabase = init_supabase()
 # --- DATABASE FUNCTIONS ---
 def add_task(created_by, assigned_to, task_desc, priority, due_date):
     try:
+        # LOGIC: If date is missing, default to TODAY
+        final_date = str(due_date) if due_date else str(date.today())
+        
         data = {
             "created_by": created_by,
             "assigned_to": assigned_to,
             "task_desc": task_desc,
             "status": "Open",
             "priority": priority,
-            "due_date": str(due_date) if due_date else None,
+            "due_date": final_date,
             "staff_remarks": "",
             "manager_remarks": ""
         }
@@ -61,26 +64,15 @@ def get_tasks(user_email, is_admin=False):
     response = query.execute()
     return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
-def update_task(task_id, status, staff_remark, manager_remark):
+def update_task_status(task_id, new_status, remarks=None):
     try:
-        data = {
-            "status": status,
-            "staff_remarks": staff_remark,
-            "manager_remarks": manager_remark
-        }
+        data = {"status": new_status}
+        if remarks:
+            data["staff_remarks"] = remarks
         supabase.table("tasks").update(data).eq("id", task_id).execute()
         return True
     except Exception as e:
         return False
-
-# --- CHATBOT ENGINE ---
-def chatbot_response(query, df):
-    query = query.lower()
-    if "how many" in query or "count" in query:
-        if "pending" in query:
-            count = len(df[df['status'] != 'Completed'])
-            return f"You have {count} pending tasks."
-    return "I can help! Try asking: 'How many pending tasks?'"
 
 # --- MAIN APP ---
 def main():
@@ -91,7 +83,7 @@ def main():
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.title("✅ RBS TaskHub")
+            st.title("🚀 RBS TaskHub")
             with st.container(border=True):
                 email = st.text_input("Enter Work Email:")
                 if st.button("Login", use_container_width=True):
@@ -107,19 +99,23 @@ def main():
         current_user = st.session_state['user']
         is_admin = (current_user == ADMIN_EMAIL)
         
+        # --- SIDEBAR NAVIGATION (The Control Center) ---
         with st.sidebar:
-            st.title(f"👤 {current_user.split('@')[0].title()}")
-            if is_admin: 
-                st.info("⚡ HEAD MODE")
+            st.title("🎛️ Menu")
+            st.info(f"👤 {current_user.split('@')[0].title()}")
+            
+            # Navigation Mode
+            nav_mode = st.radio("Go To:", ["📊 Dashboard", "➕ Create Task", "🤖 Task Assistant"])
+            
+            st.divider()
             if st.button("Logout", use_container_width=True):
                 st.session_state['logged_in'] = False
                 st.rerun()
 
-        st.title("Task Command Center")
-
-        # --- 1. THE TASK CREATOR ---
-        with st.expander("➕ Create / Assign Task", expanded=False):
-            with st.form("new_task_form"):
+        # --- VIEW 1: CREATE TASK (Moved to Sidebar/Separate View) ---
+        if nav_mode == "➕ Create Task":
+            st.header("✨ Create New Task")
+            with st.container(border=True):
                 c1, c2 = st.columns([1, 3])
                 with c1:
                     assign_type = st.radio("Assign To:", ["Myself", "Teammate"], horizontal=True)
@@ -130,118 +126,111 @@ def main():
                         target_user = current_user
                 
                 with c2:
-                    desc = st.text_input("Task Description", placeholder="e.g. Prepare Monthly Report")
+                    desc = st.text_input("Task Description", placeholder="e.g. Update Oracle Fusion Posting")
                 
-                c3, c4, c5 = st.columns(3)
+                c3, c4 = st.columns(2)
                 with c3:
                     prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
                 with c4:
-                    due = st.date_input("Target Date", min_value=date.today())
-                with c5:
-                    st.write("") 
-                    submitted = st.form_submit_button("🚀 Add Task", use_container_width=True)
+                    # DATE LOGIC: Ensure it can be empty (defaults to None if cleared)
+                    due = st.date_input("Target Date (Default: Today)", value=None)
                 
-                if submitted and desc:
-                    if add_task(current_user, target_user, desc, prio, due):
-                        st.toast(f"✅ Task assigned to {target_user}!")
-                        st.rerun()
+                st.write("")
+                if st.button("🚀 Confirm & Add Task", type="primary", use_container_width=True):
+                    if desc:
+                        if add_task(current_user, target_user, desc, prio, due):
+                            st.balloons() # Nice visual effect
+                            st.success("✅ Task Added Successfully!")
+                            # Wait 1 second then go back to dashboard? Or just stay.
+                            # For now, we show success. User can click Dashboard to see it.
+                    else:
+                        st.warning("⚠️ Please enter a description.")
 
-        # --- 2. DATA & FILTERING (FIXED LOGIC) ---
-        df = get_tasks(current_user, is_admin)
-        
-        if not df.empty:
-            # 1. Force Convert 'due_date' to Datetime (Handle Errors safely)
-            df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
-            
-            # 2. Create a standardized 'Today' timestamp (Normalize removes exact time, keeps date)
-            today_ts = pd.Timestamp.now().normalize()
-            tomorrow_ts = today_ts + pd.Timedelta(days=1)
+        # --- VIEW 2: TASK ASSISTANT ---
+        elif nav_mode == "🤖 Task Assistant":
+            st.header("💬 AI Assistant")
+            st.info("Ask questions like: 'How many pending tasks?' or 'Show overdue items'.")
+            query = st.text_input("Type your question here...")
+            if query:
+                # Simple logic for now
+                st.write("🤖 Analysis: This feature is connecting to your task data...")
+                # (We will expand this logic in next steps)
 
-            # 3. Create Filters (Only count if date exists AND task is not done)
-            has_date = df['due_date'].notna()
-            is_open = df['status'] != 'Completed'
-            
-            overdue_count = len(df[has_date & is_open & (df['due_date'] < today_ts)])
-            today_count = len(df[has_date & is_open & (df['due_date'] == today_ts)])
-            tomorrow_count = len(df[has_date & is_open & (df['due_date'] == tomorrow_ts)])
-            
-            if 'filter_view' not in st.session_state:
-                st.session_state['filter_view'] = 'Today'
+        # --- VIEW 3: DASHBOARD (Default) ---
+        elif nav_mode == "📊 Dashboard":
+            st.title("📅 Your Schedule")
 
-            st.write("### 📅 Your Schedule")
-            b1, b2, b3, b4 = st.columns(4)
+            # FETCH DATA
+            df = get_tasks(current_user, is_admin)
             
-            if b1.button(f"🚨 Overdue ({overdue_count})"):
-                st.session_state['filter_view'] = 'Overdue'
-            if b2.button(f"⚡ Today ({today_count})"):
-                st.session_state['filter_view'] = 'Today'
-            if b3.button(f"📅 Tomorrow ({tomorrow_count})"):
-                st.session_state['filter_view'] = 'Tomorrow'
-            if b4.button("📂 Show All"):
-                st.session_state['filter_view'] = 'All'
-
-            # --- APPLY FILTER ---
-            view = st.session_state['filter_view']
-            filtered_df = df.copy()
-            
-            # Format Date for Display (Strip the 00:00:00 time part)
-            filtered_df['display_date'] = filtered_df['due_date'].dt.strftime('%Y-%m-%d').fillna("No Date")
-
-            if view == 'Overdue':
-                filtered_df = filtered_df[has_date & (filtered_df['due_date'] < today_ts)]
-                st.warning(f"Displaying {len(filtered_df)} Overdue Tasks")
-            elif view == 'Today':
-                filtered_df = filtered_df[has_date & (filtered_df['due_date'] == today_ts)]
-                st.success(f"Displaying {len(filtered_df)} Tasks Due Today")
-            elif view == 'Tomorrow':
-                filtered_df = filtered_df[has_date & (filtered_df['due_date'] == tomorrow_ts)]
-                st.info(f"Displaying {len(filtered_df)} Tasks Due Tomorrow")
-            else:
-                st.caption("Displaying All Tasks")
-
-            # --- 3. TASK LIST DISPLAY ---
-            filtered_df = filtered_df.sort_values(by=["priority"], ascending=True) 
-            
-            for index, row in filtered_df.iterrows():
-                card_color = "red" if row['priority'] == '🔥 High' else "grey"
+            if not df.empty:
+                # DATE PROCESSING
+                df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
+                today_ts = pd.Timestamp.now().normalize()
                 
-                with st.container(border=True):
-                    c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-                    
-                    with c1:
-                        st.markdown(f"**{row['task_desc']}**")
-                        assign_label = "Me" if row['assigned_to'] == current_user else row['assigned_to']
-                        st.caption(f"👤 {assign_label} | 📅 {row['display_date']} | {row['priority']}")
-                    
-                    with c2:
-                        curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
-                        new_rem = st.text_input("My Remarks", value=curr_rem, key=f"r_{row['id']}")
-                    
-                    with c3:
-                        mgr_rem = row['manager_remarks'] if row['manager_remarks'] else ""
-                        new_mgr = st.text_input("Head Reply", value=mgr_rem, key=f"m_{row['id']}", disabled=not is_admin)
-                    
-                    with c4:
-                        status_opts = ["Open", "In Progress", "Pending Info", "Completed"]
-                        try:
-                            s_idx = status_opts.index(row['status'])
-                        except:
-                            s_idx = 0
-                        new_stat = st.selectbox("Status", status_opts, index=s_idx, key=f"s_{row['id']}", label_visibility="collapsed")
+                # Default Filter: TODAY
+                if 'filter_view' not in st.session_state:
+                    st.session_state['filter_view'] = 'Today'
+
+                # FILTER BUTTONS
+                c1, c2, c3, c4 = st.columns(4)
+                if c1.button("⚡ Today"): st.session_state['filter_view'] = 'Today'
+                if c2.button("📅 Tomorrow"): st.session_state['filter_view'] = 'Tomorrow'
+                if c3.button("🚨 Overdue"): st.session_state['filter_view'] = 'Overdue'
+                if c4.button("📂 All Pending"): st.session_state['filter_view'] = 'All'
+
+                # FILTER LOGIC
+                view = st.session_state['filter_view']
+                active_df = df[df['status'] != 'Completed'].copy() # Only show OPEN tasks
+                
+                if view == 'Today':
+                    filtered_df = active_df[active_df['due_date'] == today_ts]
+                    st.caption("Focus Mode: Tasks Due Today")
+                elif view == 'Tomorrow':
+                    filtered_df = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
+                    st.caption("Planning Mode: Tomorrow")
+                elif view == 'Overdue':
+                    filtered_df = active_df[active_df['due_date'] < today_ts]
+                    st.caption("Action Mode: Overdue Items")
+                else:
+                    filtered_df = active_df
+                    st.caption("Overview Mode: All Pending")
+
+                # DISPLAY CARDS
+                if filtered_df.empty:
+                    st.success("🎉 No tasks in this view! You are all caught up.")
+                
+                filtered_df = filtered_df.sort_values(by=["priority"], ascending=True)
+                
+                for index, row in filtered_df.iterrows():
+                    # CARD DESIGN
+                    with st.container(border=True):
+                        c1, c2, c3 = st.columns([4, 2, 1])
                         
-                        if st.button("Update", key=f"btn_{row['id']}"):
-                            update_task(row['id'], new_stat, new_rem, new_mgr)
-                            st.rerun()
-                            
-        else:
-            st.info("No tasks found. Create one above!")
+                        with c1:
+                            # Task Title & Info
+                            st.markdown(f"### {row['task_desc']}")
+                            display_date = row['due_date'].strftime('%Y-%m-%d') if pd.notnull(row['due_date']) else "No Date"
+                            st.caption(f"📅 Due: {display_date} | Priority: {row['priority']}")
+                            if row['staff_remarks']:
+                                st.info(f"📝 Note: {row['staff_remarks']}")
 
-        # --- 4. TASK ASSISTANT ---
-        with st.expander("💬 Task Assistant (Beta)", expanded=False):
-            user_query = st.text_input("Ask about tasks...", placeholder="e.g. How many pending today?")
-            if user_query:
-                bot_reply = chatbot_response(user_query, df)
-                st.write(f"🤖 **Bot:** {bot_reply}")
+                        with c2:
+                            # Quick Remark
+                            new_rem = st.text_input("Add Remark", key=f"rem_{row['id']}", placeholder="Update status...")
+                            if new_rem:
+                                update_task_status(row['id'], row['status'], new_rem)
+                                st.toast("Remark Saved")
+
+                        with c3:
+                            # THE MAGIC "DONE" BUTTON
+                            st.write("") # Spacer to align button down
+                            if st.button("✅ Done", key=f"done_{row['id']}", type="primary", use_container_width=True):
+                                update_task_status(row['id'], "Completed")
+                                st.balloons()
+                                st.rerun() # INSTANT REFRESH
+            else:
+                st.info("👋 Welcome! Go to 'Create Task' in the sidebar to start.")
 
 if __name__ == "__main__":
     main()
