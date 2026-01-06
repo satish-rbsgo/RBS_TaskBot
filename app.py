@@ -1,15 +1,24 @@
 import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
-import re
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="✅")
 
 # --- CONFIGURATION ---
 COMPANY_DOMAIN = "@rbsgo.com"
 ADMIN_EMAIL = "msk@rbsgo.com"
+
+# --- TEAM ROSTER (Add all emails here) ---
+TEAM_MEMBERS = [
+    "msk@rbsgo.com",
+    "praveen@rbsgo.com",
+    "arjun@rbsgo.com",
+    "prasanna@rbsgo.com",
+    "chris@rbsgo.com",
+    "sarah@rbsgo.com"
+]
 
 # --- SECURE CONNECTION ---
 try:
@@ -23,23 +32,10 @@ except FileNotFoundError:
 def init_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-try:
-    supabase = init_supabase()
-except Exception as e:
-    st.error(f"Failed to connect to Database: {e}")
-    st.stop()
+supabase = init_supabase()
 
 # --- DATABASE FUNCTIONS ---
-
-def log_activity(user_email, action, details):
-    """Records an action in the history log"""
-    try:
-        data = {"user_email": user_email, "action": action, "details": details}
-        supabase.table("activity_logs").insert(data).execute()
-    except Exception as e:
-        print(f"Log Error: {e}")
-
-def add_task_to_db(created_by, assigned_to, task_desc, priority, due_date):
+def add_task(created_by, assigned_to, task_desc, priority, due_date):
     try:
         data = {
             "created_by": created_by,
@@ -47,38 +43,27 @@ def add_task_to_db(created_by, assigned_to, task_desc, priority, due_date):
             "task_desc": task_desc,
             "status": "Open",
             "priority": priority,
-            "due_date": str(due_date) if due_date else None,
+            "due_date": str(due_date),
             "staff_remarks": "",
             "manager_remarks": ""
         }
         supabase.table("tasks").insert(data).execute()
-        # Log it
-        log_activity(created_by, "Created Task", f"Assigned to {assigned_to}: {task_desc[:30]}...")
         return True
     except Exception as e:
-        st.error(f"Error saving task: {e}")
+        st.error(f"Error: {e}")
         return False
 
 def get_tasks(user_email, is_admin=False):
-    try:
-        query = supabase.table("tasks").select("*")
-        if not is_admin:
-            query = query.eq("assigned_to", user_email)
-        
-        response = query.order("id", desc=True).execute()
-        return pd.DataFrame(response.data) if response.data else pd.DataFrame()
-    except Exception as e:
-        st.error(f"Database Error: {e}")
-        return pd.DataFrame()
+    # If Admin, fetch EVERYTHING (for Analytics). If User, fetch ONLY assigned to them.
+    # But for the "Team Overview", Admin needs to see all.
+    query = supabase.table("tasks").select("*")
+    if not is_admin:
+        query = query.eq("assigned_to", user_email)
+    
+    response = query.execute()
+    return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
-def get_activity_logs():
-    try:
-        response = supabase.table("activity_logs").select("*").order("id", desc=True).limit(20).execute()
-        return pd.DataFrame(response.data) if response.data else pd.DataFrame()
-    except Exception as e:
-        return pd.DataFrame()
-
-def update_task(task_id, status, staff_remark, manager_remark, user_email):
+def update_task(task_id, status, staff_remark, manager_remark):
     try:
         data = {
             "status": status,
@@ -86,37 +71,31 @@ def update_task(task_id, status, staff_remark, manager_remark, user_email):
             "manager_remarks": manager_remark
         }
         supabase.table("tasks").update(data).eq("id", task_id).execute()
-        # Log it
-        log_activity(user_email, "Updated Task", f"Task #{task_id} -> {status}")
         return True
     except Exception as e:
-        st.error(f"Update failed: {e}")
         return False
 
-# --- PARSING ENGINE ---
-def parse_command(command_text, current_user):
-    assigned_to = current_user 
-    task_detail = command_text
+# --- CHATBOT ENGINE (Simple Rule-Based) ---
+def chatbot_response(query, df):
+    query = query.lower()
     
-    # Team Mapping
-    team_map = {
-        "praveen": "praveen@rbsgo.com",
-        "arjun": "arjun@rbsgo.com",
-        "msk": "msk@rbsgo.com",
-        "prasanna": "prasanna@rbsgo.com",
-        "chris": "chris@rbsgo.com",
-        "sarah": "sarah@rbsgo.com"
-    }
-    
-    lower_cmd = command_text.lower()
-    for name, email in team_map.items():
-        if name in lower_cmd:
-            assigned_to = email
-            task_detail = re.sub(name, "", task_detail, flags=re.IGNORECASE)
-            task_detail = re.sub(r"^(ask|tell|assign|to|request)\s+", "", task_detail, flags=re.IGNORECASE).strip()
-            break
+    # 1. Count Queries
+    if "how many" in query or "count" in query:
+        if "pending" in query:
+            count = len(df[df['status'] != 'Completed'])
+            return f"You have {count} pending tasks."
+        if "high" in query:
+            count = len(df[df['priority'] == '🔥 High'])
+            return f"You have {count} High Priority tasks."
             
-    return assigned_to, task_detail
+    # 2. List Queries
+    if "show" in query or "list" in query:
+        if "today" in query:
+            today_str = str(date.today())
+            tasks = df[df['due_date'] == today_str]['task_desc'].tolist()
+            return "Tasks for Today:\n" + "\n".join([f"- {t}" for t in tasks]) if tasks else "Nothing due today!"
+            
+    return "I can help! Try asking: 'How many pending tasks?' or 'Show tasks for today'."
 
 # --- MAIN APP ---
 def main():
@@ -127,130 +106,159 @@ def main():
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.title("🚀 RBS TaskHub")
-            st.markdown("### Secure Internal Workspace")
+            st.title("✅ RBS TaskHub")
             with st.container(border=True):
-                email = st.text_input("Work Email Address")
-                if st.button("Access Dashboard", type="primary", use_container_width=True):
+                email = st.text_input("Enter Work Email:")
+                if st.button("Login", use_container_width=True):
                     if email.endswith(COMPANY_DOMAIN):
                         st.session_state['logged_in'] = True
                         st.session_state['user'] = email
                         st.rerun()
                     else:
-                        st.error(f"🚫 Access Denied. {COMPANY_DOMAIN} only.")
+                        st.error(f"Restricted Access. {COMPANY_DOMAIN} only.")
 
-    # --- DASHBOARD ---
+    # --- MAIN DASHBOARD ---
     else:
         current_user = st.session_state['user']
         is_admin = (current_user == ADMIN_EMAIL)
         
-        # Sidebar with Live Activity Feed
+        # Sidebar Profile
         with st.sidebar:
             st.title(f"👤 {current_user.split('@')[0].title()}")
-            if is_admin:
+            if is_admin: 
                 st.info("⚡ HEAD MODE")
-            
-            st.divider()
-            st.subheader("📡 Live Activity")
-            logs = get_activity_logs()
-            if not logs.empty:
-                for _, row in logs.iterrows():
-                    # Format timestamp
-                    ts = row['timestamp'][:16].replace("T", " ")
-                    st.caption(f"**{row['user_email'].split('@')[0]}** {row['action']}")
-                    st.text(f"{row['details']}")
-                    st.markdown("---")
-            
             if st.button("Logout", use_container_width=True):
                 st.session_state['logged_in'] = False
                 st.rerun()
 
-        # MAIN TABS
         st.title("Task Command Center")
-        tab1, tab2, tab3 = st.tabs(["📝 My Workspace", "👥 Team Overview", "📊 Analytics"])
 
-        # --- TAB 1: CREATE & MANAGE ---
-        with tab1:
-            with st.expander("➕ Create New Task", expanded=True):
-                c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+        # --- 1. THE TASK CREATOR (Self vs Team) ---
+        with st.expander("➕ Create / Assign Task", expanded=False):
+            with st.form("new_task_form"):
+                c1, c2 = st.columns([1, 3])
                 with c1:
-                    cmd = st.text_input("Task Description / Command", placeholder="e.g. Ask Praveen to check logs")
+                    # The Magic Toggle
+                    assign_type = st.radio("Assign To:", ["Myself", "Teammate"], horizontal=True)
+                    if assign_type == "Teammate":
+                        # Filter out current user from list to avoid confusion
+                        peers = [m for m in TEAM_MEMBERS if m != current_user]
+                        target_user = st.selectbox("Select User", peers)
+                    else:
+                        target_user = current_user
+                
                 with c2:
-                    priority = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"], index=1)
+                    desc = st.text_input("Task Description", placeholder="e.g. Prepare Monthly Report")
+                
+                c3, c4, c5 = st.columns(3)
                 with c3:
-                    due_date = st.date_input("Due Date", min_value=date.today())
+                    prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
                 with c4:
-                    st.write("")
-                    st.write("")
-                    if st.button("Assign", type="primary", use_container_width=True):
-                        if cmd:
-                            who, what = parse_command(cmd, current_user)
-                            if add_task_to_db(current_user, who, what, priority, due_date):
-                                st.toast(f"Assigned to {who}")
-                                st.rerun()
+                    due = st.date_input("Target Date", min_value=date.today())
+                with c5:
+                    st.write("") # Spacer
+                    submitted = st.form_submit_button("🚀 Add Task", use_container_width=True)
+                
+                if submitted and desc:
+                    if add_task(current_user, target_user, desc, prio, due):
+                        st.toast(f"✅ Task assigned to {target_user}!")
+                        st.rerun()
 
-            # Load Tasks
-            df = get_tasks(current_user, is_admin)
+        # --- 2. DATA & FILTERING ---
+        df = get_tasks(current_user, is_admin)
+        
+        if not df.empty:
+            # Ensure Date column is standard
+            df['due_date'] = pd.to_datetime(df['due_date']).dt.date
+            today = date.today()
             
-            if not df.empty:
-                st.subheader("My Active Tasks")
-                # Filter for non-completed if user prefers, or show all
-                active_df = df.sort_values(by=["id"], ascending=False)
+            # --- DATE COUNTS (The "Navigator") ---
+            # Calculate counts for the buttons
+            overdue_count = len(df[(df['due_date'] < today) & (df['status'] != 'Completed')])
+            today_count = len(df[(df['due_date'] == today) & (df['status'] != 'Completed')])
+            tomorrow_count = len(df[(df['due_date'] == today + timedelta(days=1)) & (df['status'] != 'Completed')])
+            
+            # Use Session State to remember which filter is active
+            if 'filter_view' not in st.session_state:
+                st.session_state['filter_view'] = 'Today'
 
-                for index, row in active_df.iterrows():
-                    # Visual Card
-                    border_color = "red" if "High" in row['priority'] else "grey"
-                    with st.container(border=True):
-                        col_a, col_b, col_c, col_d = st.columns([3, 2, 2, 1])
-                        with col_a:
-                            st.markdown(f"**{row['task_desc']}**")
-                            st.caption(f"👤 {row['assigned_to']} | 📅 {row['due_date']} | {row['priority']}")
-                        with col_b:
-                            curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
-                            new_rem = st.text_input("My Update", value=curr_rem, key=f"r_{row['id']}")
-                        with col_c:
-                            mgr_rem = row['manager_remarks'] if row['manager_remarks'] else ""
-                            new_mgr = st.text_input("Feedback", value=mgr_rem, key=f"m_{row['id']}", disabled=not is_admin)
-                        with col_d:
-                            status_opts = ["Open", "In Progress", "Pending Info", "Completed"]
-                            try:
-                                s_idx = status_opts.index(row['status'])
-                            except:
-                                s_idx = 0
-                            new_stat = st.selectbox("Status", status_opts, index=s_idx, key=f"s_{row['id']}", label_visibility="collapsed")
+            # Metric Buttons (Clickable Filters)
+            st.write("### 📅 Your Schedule")
+            b1, b2, b3, b4 = st.columns(4)
+            
+            if b1.button(f"🚨 Overdue ({overdue_count})"):
+                st.session_state['filter_view'] = 'Overdue'
+            if b2.button(f"⚡ Today ({today_count})"):
+                st.session_state['filter_view'] = 'Today'
+            if b3.button(f"📅 Tomorrow ({tomorrow_count})"):
+                st.session_state['filter_view'] = 'Tomorrow'
+            if b4.button("📂 Show All"):
+                st.session_state['filter_view'] = 'All'
+
+            # --- APPLY FILTER ---
+            view = st.session_state['filter_view']
+            filtered_df = df.copy()
+            
+            if view == 'Overdue':
+                filtered_df = df[df['due_date'] < today]
+                st.warning(f"Displaying {len(filtered_df)} Overdue Tasks")
+            elif view == 'Today':
+                filtered_df = df[df['due_date'] == today]
+                st.success(f"Displaying {len(filtered_df)} Tasks Due Today")
+            elif view == 'Tomorrow':
+                filtered_df = df[df['due_date'] == today + timedelta(days=1)]
+                st.info(f"Displaying {len(filtered_df)} Tasks Due Tomorrow")
+            else:
+                st.caption("Displaying All Tasks")
+
+            # --- 3. TASK LIST DISPLAY ---
+            # Sort: High Priority first
+            filtered_df = filtered_df.sort_values(by=["priority"], ascending=True) # Ascending because "🔥" comes after letters
+            
+            for index, row in filtered_df.iterrows():
+                # Card Styling
+                card_color = "red" if row['priority'] == '🔥 High' else "grey"
+                
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+                    
+                    with c1:
+                        # Title
+                        st.markdown(f"**{row['task_desc']}**")
+                        # Subtitle
+                        assign_label = "Me" if row['assigned_to'] == current_user else row['assigned_to']
+                        st.caption(f"👤 {assign_label} | 📅 {row['due_date']} | {row['priority']}")
+                    
+                    with c2:
+                        curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
+                        new_rem = st.text_input("My Remarks", value=curr_rem, key=f"r_{row['id']}")
+                    
+                    with c3:
+                        mgr_rem = row['manager_remarks'] if row['manager_remarks'] else ""
+                        new_mgr = st.text_input("Head Reply", value=mgr_rem, key=f"m_{row['id']}", disabled=not is_admin)
+                    
+                    with c4:
+                        status_opts = ["Open", "In Progress", "Pending Info", "Completed"]
+                        try:
+                            s_idx = status_opts.index(row['status'])
+                        except:
+                            s_idx = 0
+                        new_stat = st.selectbox("Status", status_opts, index=s_idx, key=f"s_{row['id']}", label_visibility="collapsed")
+                        
+                        if st.button("Update", key=f"btn_{row['id']}"):
+                            update_task(row['id'], new_stat, new_rem, new_mgr)
+                            st.rerun()
                             
-                            if st.button("Save", key=f"b_{row['id']}"):
-                                update_task(row['id'], new_stat, new_rem, new_mgr, current_user)
-                                st.rerun()
-            else:
-                st.info("No tasks found.")
+        else:
+            st.info("No tasks found. Create one above!")
 
-        # --- TAB 2: TEAM OVERVIEW (Admin Only) ---
-        with tab2:
-            if is_admin:
-                st.subheader("Global Task List")
-                st.dataframe(df, use_container_width=True)
-            else:
-                st.warning("Restricted to Head of Department.")
-
-        # --- TAB 3: ANALYTICS ---
-        with tab3:
-            st.subheader("Team Performance Metrics")
-            if not df.empty:
-                c1, c2 = st.columns(2)
-                
-                with c1:
-                    st.markdown("#### 🏆 Workload Distribution")
-                    # Count tasks per person
-                    task_counts = df['assigned_to'].value_counts()
-                    st.bar_chart(task_counts)
-                
-                with c2:
-                    st.markdown("#### 🚦 Status Breakdown")
-                    status_counts = df['status'].value_counts()
-                    st.bar_chart(status_counts, color="#ffaa00") # Custom color
-            else:
-                st.info("Not enough data for analytics yet.")
+        # --- 4. TASK ASSISTANT CHATBOT (Bottom Right) ---
+        with st.expander("💬 Task Assistant (Beta)", expanded=False):
+            user_query = st.text_input("Ask about tasks...", placeholder="e.g. How many pending today?")
+            if user_query:
+                # We pass the FULL dataframe to the bot so it can count properly
+                bot_reply = chatbot_response(user_query, df)
+                st.write(f"🤖 **Bot:** {bot_reply}")
 
 if __name__ == "__main__":
     main()
