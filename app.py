@@ -7,25 +7,21 @@ from streamlit_gsheets import GSheetsConnection
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
 
-# --- CUSTOM CSS FOR COMPACT "DIARY" LOOK ---
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    /* Reduce padding inside task cards to make them slim */
     div[data-testid="stVerticalBlockBorderWrapper"] > div {
         padding: 12px !important; 
         padding-bottom: 8px !important;
     }
-    /* Reduce gap between cards */
     div[data-testid="stVerticalBlock"] > div {
         gap: 0.5rem !important;
     }
-    /* Compact Buttons */
     .stButton button {
         height: 35px;
         padding-top: 0px;
         padding-bottom: 0px;
     }
-    /* Tighter Text Spacing */
     p, h3 {
         margin-bottom: 4px !important;
     }
@@ -35,7 +31,6 @@ st.markdown("""
 # --- CONFIGURATION ---
 COMPANY_DOMAIN = "@rbsgo.com"
 ADMIN_EMAIL = "msk@rbsgo.com"
-
 TEAM_MEMBERS = ["msk@rbsgo.com", "praveen@rbsgo.com", "arjun@rbsgo.com", 
                 "prasanna@rbsgo.com", "chris@rbsgo.com", "sarah@rbsgo.com"]
 
@@ -44,7 +39,7 @@ try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 except FileNotFoundError:
-    st.error("🚨 Secrets not found! Please configure secrets.")
+    st.error("🚨 Secrets not found!")
     st.stop()
 
 @st.cache_resource
@@ -53,11 +48,10 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- GOOGLE SHEETS SYNC ENGINE ---
+# --- GOOGLE SHEETS SYNC ---
 def sync_projects():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        # Reading from the 'ROADMAP' tab in your sheet
         df = conn.read(worksheet="ROADMAP") 
         count = 0
         for index, row in df.iterrows():
@@ -68,7 +62,6 @@ def sync_projects():
                 "description": row['Description'],
                 "client": row['Client']
             }
-            # Upsert ensures we don't create duplicates
             supabase.table("projects").upsert(data, on_conflict="name").execute()
             count += 1
         return True, f"Synced {count} Projects!"
@@ -124,7 +117,6 @@ def main():
     if 'logged_in' not in st.session_state:
         st.session_state['logged_in'] = False
 
-    # --- LOGIN SCREEN ---
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -139,7 +131,6 @@ def main():
                     else:
                         st.error(f"Restricted Access. {COMPANY_DOMAIN} only.")
 
-    # --- DASHBOARD ---
     else:
         current_user = st.session_state['user']
         is_admin = (current_user == ADMIN_EMAIL)
@@ -147,7 +138,6 @@ def main():
         with st.sidebar:
             st.title("🎛️ Menu")
             st.info(f"👤 {current_user.split('@')[0].title()}")
-            
             nav_mode = st.radio("Go To:", ["📔 Your Diary", "➕ Create Task", "🔄 Project Sync"])
             
             st.divider()
@@ -155,39 +145,27 @@ def main():
                 st.session_state['logged_in'] = False
                 st.rerun()
 
-        # --- VIEW: SYNC PROJECTS ---
         if nav_mode == "🔄 Project Sync":
             st.header("🔗 Google Sheets Integration")
-            st.info("Pull latest projects from Master DB (ROADMAP Tab)")
-            
             if st.button("🚀 Sync Projects Now", type="primary"):
-                with st.spinner("Connecting to Google Drive..."):
+                with st.spinner("Connecting..."):
                     success, msg = sync_projects()
                     if success: st.success(msg)
                     else: st.error(msg)
-            
             projects = get_projects()
             if projects:
                 st.write(f"**Active Projects ({len(projects)}):**")
                 st.dataframe(projects, use_container_width=True)
 
-        # --- VIEW: CREATE TASK ---
         elif nav_mode == "➕ Create Task":
             st.header("✨ Create New Task")
             with st.container(border=True):
-                # Project Dropdown
                 project_list = get_projects()
-                selected_project = st.selectbox("📂 Project / Interface (Optional)", ["General"] + project_list)
-                
+                selected_project = st.selectbox("📂 Project (Optional)", ["General"] + project_list)
                 c1, c2 = st.columns([1, 3])
                 with c1:
                     assign_type = st.radio("Assign To:", ["Myself", "Teammate"], horizontal=True)
-                    if assign_type == "Teammate":
-                        peers = [m for m in TEAM_MEMBERS if m != current_user]
-                        target_user = st.selectbox("Select User", peers)
-                    else:
-                        target_user = current_user
-                
+                    target_user = st.selectbox("Select User", [m for m in TEAM_MEMBERS if m != current_user]) if assign_type == "Teammate" else current_user
                 with c2:
                     desc = st.text_input("Task Description", placeholder="e.g. Fix API Error")
                 
@@ -205,20 +183,16 @@ def main():
                     else:
                         st.warning("⚠️ Enter a description.")
 
-        # --- VIEW: COMPACT DIARY ---
         elif nav_mode == "📔 Your Diary":
             st.title("📔 Your Diary")
-
             df = get_tasks(current_user, is_admin)
             
             if not df.empty:
                 df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
                 today_ts = pd.Timestamp.now().normalize()
                 
-                # Default Filter: Show ALL first
                 if 'filter_view' not in st.session_state: st.session_state['filter_view'] = 'All'
 
-                # FILTER BUTTONS (Reordered: All First -> Today -> Tomorrow -> Overdue)
                 c1, c2, c3, c4 = st.columns(4)
                 if c1.button("📂 All Pending"): st.session_state['filter_view'] = 'All'
                 if c2.button("⚡ Today"): st.session_state['filter_view'] = 'Today'
@@ -228,53 +202,30 @@ def main():
                 view = st.session_state['filter_view']
                 active_df = df[df['status'] != 'Completed'].copy()
                 
-                if view == 'Today': 
-                    filtered_df = active_df[active_df['due_date'] == today_ts]
-                    st.caption("Focus: Today")
-                elif view == 'Tomorrow': 
-                    filtered_df = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
-                    st.caption("Focus: Tomorrow")
-                elif view == 'Overdue': 
-                    filtered_df = active_df[active_df['due_date'] < today_ts]
-                    st.caption("Focus: Overdue")
-                else: 
-                    filtered_df = active_df
-                    st.caption("Focus: All Tasks")
+                if view == 'Today': filtered_df = active_df[active_df['due_date'] == today_ts]
+                elif view == 'Tomorrow': filtered_df = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
+                elif view == 'Overdue': filtered_df = active_df[active_df['due_date'] < today_ts]
+                else: filtered_df = active_df
 
                 if filtered_df.empty:
                     st.success("🎉 List empty!")
                 else:
-                    # Sort: Date (soonest first) -> Priority
                     filtered_df = filtered_df.sort_values(by=["due_date", "priority"], ascending=[True, True])
-                    
                     for index, row in filtered_df.iterrows():
-                        # --- COMPACT CARD LAYOUT ---
                         with st.container(border=True):
-                            # Columns: Date(3) | Task(5) | Action(2)
                             c1, c2, c3 = st.columns([3, 5, 2])
-                            
                             with c1:
-                                # Date & Project Tag (Bold Date)
                                 date_str = row['due_date'].strftime('%d-%b') if pd.notnull(row['due_date']) else "No Date"
                                 st.markdown(f"**📅 {date_str}**")
-                                
-                                # Project Tag logic
                                 proj = row['project_ref'] if row['project_ref'] else "General"
-                                # Truncate long project names to keep card small
                                 if len(proj) > 15: proj = proj[:15] + ".."
                                 st.caption(f"{row['priority']} | {proj}")
-                                
                             with c2:
-                                # Task Description
                                 st.markdown(f"**{row['task_desc']}**")
                                 if row['staff_remarks']: st.caption(f"📝 {row['staff_remarks']}")
-                                
-                                # Invisible label remark box for compactness
                                 new_rem = st.text_input("Remark", key=f"r_{row['id']}", label_visibility="collapsed", placeholder="Add update...")
                                 if new_rem: update_task_status(row['id'], row['status'], new_rem)
-
                             with c3:
-                                # DONE BUTTON
                                 if st.button("✅ Done", key=f"d_{row['id']}", type="primary", use_container_width=True):
                                     update_task_status(row['id'], "Completed")
                                     st.rerun()
