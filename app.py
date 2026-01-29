@@ -3,6 +3,7 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
@@ -10,21 +11,10 @@ st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    div[data-testid="stVerticalBlockBorderWrapper"] > div {
-        padding: 12px !important; 
-        padding-bottom: 8px !important;
-    }
-    div[data-testid="stVerticalBlock"] > div {
-        gap: 0.5rem !important;
-    }
-    .stButton button {
-        height: 35px;
-        padding-top: 0px;
-        padding-bottom: 0px;
-    }
-    p, h3 {
-        margin-bottom: 4px !important;
-    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 12px !important; padding-bottom: 8px !important; }
+    div[data-testid="stVerticalBlock"] > div { gap: 0.5rem !important; }
+    .stButton button { height: 35px; padding-top: 0px; padding-bottom: 0px; }
+    p, h3 { margin-bottom: 4px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -36,17 +26,48 @@ TEAM_MEMBERS = ["msk@rbsgo.com", "praveen@rbsgo.com", "arjun@rbsgo.com",
 
 # --- SECURE CONNECTION ---
 try:
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-except FileNotFoundError:
-    st.error("🚨 Secrets not found!")
-    st.stop()
+    SUPABASE_URL = st.secrets["connections.supabase"]["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["connections.supabase"]["SUPABASE_KEY"]
+except:
+    # Fallback for old secrets format
+    try:
+        SUPABASE_URL = st.secrets["SUPABASE_URL"]
+        SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    except FileNotFoundError:
+        st.error("🚨 Secrets not found!")
+        st.stop()
 
 @st.cache_resource
 def init_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase = init_supabase()
+
+# --- GEMINI AI SETUP ---
+def get_ai_summary(task_dataframe):
+    try:
+        if "GOOGLE_API_KEY" in st.secrets:
+            api_key = st.secrets["GOOGLE_API_KEY"]
+        else:
+            return "⚠️ Google API Key missing in secrets."
+            
+        llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=api_key)
+        
+        # Convert tasks to a string format for the AI
+        task_text = task_dataframe.to_string(index=False)
+        prompt = f"""
+        You are a helpful project manager. Here is a list of tasks for the team:
+        {task_text}
+        
+        Please provide a concise 3-bullet point summary of:
+        1. What is most urgent (High priority).
+        2. Any bottlenecks (Overdue items).
+        3. A motivational quote for the team.
+        """
+        response = llm.invoke(prompt)
+        return response.content
+    except Exception as e:
+        return f"AI Error: {str(e)}"
 
 # --- GOOGLE SHEETS SYNC ---
 def sync_projects():
@@ -139,6 +160,19 @@ def main():
             st.title("🎛️ Menu")
             st.info(f"👤 {current_user.split('@')[0].title()}")
             nav_mode = st.radio("Go To:", ["📔 Your Diary", "➕ Create Task", "🔄 Project Sync"])
+            
+            st.divider()
+            
+            # --- NEW AI FEATURE ---
+            st.subheader("✨ AI Assistant")
+            if st.button("Generate Daily Briefing"):
+                with st.spinner("Gemini is analyzing your tasks..."):
+                    my_tasks = get_tasks(current_user, is_admin)
+                    if not my_tasks.empty:
+                        summary = get_ai_summary(my_tasks)
+                        st.markdown(summary)
+                    else:
+                        st.warning("No tasks to analyze!")
             
             st.divider()
             if st.button("Logout", use_container_width=True):
