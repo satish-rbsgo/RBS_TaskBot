@@ -248,10 +248,22 @@ def main():
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
 
-                # --- NEW HORIZONTAL MENU FILTER (REPLACES TABS) ---
+                # --- CALCULATE COUNTS FOR BADGES ---
+                c_all = len(active_df)
+                c_today = len(active_df[active_df['due_date'] == today_ts])
+                c_tmrw = len(active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)])
+                c_over = len(active_df[active_df['due_date'] < today_ts])
+
+                # Dynamic Option Names
+                opt_all = f"All Pending ({c_all})"
+                opt_today = f"Today ({c_today})"
+                opt_tmrw = f"Tomorrow ({c_tmrw})"
+                opt_over = f"Overdue ({c_over})"
+
+                # --- NEW HORIZONTAL MENU WITH COUNTS ---
                 selected_filter = option_menu(
                     menu_title=None,
-                    options=["All Pending", "Today", "Tomorrow", "Overdue"],
+                    options=[opt_all, opt_today, opt_tmrw, opt_over],
                     icons=["folder", "lightning", "calendar", "exclamation-triangle"],
                     orientation="horizontal",
                     styles={
@@ -261,12 +273,12 @@ def main():
                     }
                 )
 
-                # FILTER LOGIC
-                if selected_filter == 'Today': 
+                # FILTER LOGIC (Matching the dynamic variables)
+                if selected_filter == opt_today: 
                     filtered = active_df[active_df['due_date'] == today_ts]
-                elif selected_filter == 'Tomorrow': 
+                elif selected_filter == opt_tmrw: 
                     filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
-                elif selected_filter == 'Overdue': 
+                elif selected_filter == opt_over: 
                     filtered = active_df[active_df['due_date'] < today_ts]
                 else: 
                     filtered = active_df
