@@ -8,13 +8,29 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
 
-# --- CUSTOM CSS ---
+# --- MSK STYLE CSS (COMPACT & CLEAN) ---
 st.markdown("""
 <style>
-    div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 12px !important; padding-bottom: 8px !important; }
-    div[data-testid="stVerticalBlock"] > div { gap: 0.5rem !important; }
-    .stButton button { height: 35px; padding-top: 0px; padding-bottom: 0px; }
-    p, h3 { margin-bottom: 4px !important; }
+    /* Reduce main padding */
+    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
+    
+    /* Compact Text */
+    p, .stMarkdown { font-size: 14px !important; margin-bottom: 0px !important; }
+    h1, h2, h3 { margin-bottom: 0.5rem !important; margin-top: 0rem !important; }
+    
+    /* Tighten Expanders (The Task Rows) */
+    .streamlit-expanderHeader { 
+        padding-top: 5px !important; 
+        padding-bottom: 5px !important; 
+        background-color: #f0f2f6; 
+        border-radius: 5px;
+    }
+    
+    /* Button Styling */
+    .stButton button { width: 100%; border-radius: 5px; height: 2.5rem; }
+    
+    /* Sidebar Compact */
+    section[data-testid="stSidebar"] .block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -49,27 +65,24 @@ def get_ai_summary(task_dataframe):
         if "GOOGLE_API_KEY" in st.secrets:
             api_key = st.secrets["GOOGLE_API_KEY"]
         else:
-            return "⚠️ Google API Key missing in secrets."
+            return "⚠️ Google API Key missing."
             
         llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=api_key)
-        
-        # Convert tasks to a string format for the AI
         task_text = task_dataframe.to_string(index=False)
         prompt = f"""
-        You are a helpful project manager. Here is a list of tasks for the team:
+        You are an executive assistant. Here is the task list:
         {task_text}
-        
-        Please provide a concise 3-bullet point summary of:
-        1. What is most urgent (High priority).
-        2. Any bottlenecks (Overdue items).
-        3. A motivational quote for the team.
+        Provide a 3-bullet executive summary: 
+        1. Critical Bottlenecks (Overdue/High Priority)
+        2. Today's Focus
+        3. A quick motivational one-liner.
         """
         response = llm.invoke(prompt)
         return response.content
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# --- GOOGLE SHEETS SYNC ---
+# --- SYNC & DATA FUNCTIONS ---
 def sync_projects():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
@@ -96,10 +109,11 @@ def get_projects():
     except:
         return []
 
-# --- DATABASE FUNCTIONS ---
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref):
     try:
         final_date = str(due_date) if due_date else str(date.today())
+        # Ensure project_ref is not empty
+        final_project = project_ref if project_ref else "General"
         data = {
             "created_by": created_by,
             "assigned_to": assigned_to,
@@ -107,7 +121,7 @@ def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref
             "status": "Open",
             "priority": priority,
             "due_date": final_date,
-            "project_ref": project_ref,
+            "project_ref": final_project,
             "staff_remarks": "",
             "manager_remarks": ""
         }
@@ -135,8 +149,7 @@ def update_task_status(task_id, new_status, remarks=None):
 
 # --- MAIN APP ---
 def main():
-    if 'logged_in' not in st.session_state:
-        st.session_state['logged_in'] = False
+    if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -151,120 +164,126 @@ def main():
                         st.rerun()
                     else:
                         st.error(f"Restricted Access. {COMPANY_DOMAIN} only.")
-
     else:
         current_user = st.session_state['user']
         is_admin = (current_user == ADMIN_EMAIL)
         
         with st.sidebar:
-            st.title("🎛️ Menu")
-            st.info(f"👤 {current_user.split('@')[0].title()}")
-            nav_mode = st.radio("Go To:", ["📔 Your Diary", "➕ Create Task", "🔄 Project Sync"])
-            
+            st.title("🎛️ Command Ctr")
+            st.caption(f"Logged in as: {current_user}")
+            nav_mode = st.radio("Navigate", ["📔 My Diary", "➕ New Task", "🔄 Sync Roadmap"])
             st.divider()
             
-            # --- NEW AI FEATURE ---
-            st.subheader("✨ AI Assistant")
-            if st.button("Generate Daily Briefing"):
-                with st.spinner("Gemini is analyzing your tasks..."):
+            # AI SECTION
+            st.subheader("✨ AI Insight")
+            if st.button("Run Daily Briefing"):
+                with st.spinner("Analyzing..."):
                     my_tasks = get_tasks(current_user, is_admin)
                     if not my_tasks.empty:
-                        summary = get_ai_summary(my_tasks)
-                        st.markdown(summary)
+                        st.info(get_ai_summary(my_tasks))
                     else:
-                        st.warning("No tasks to analyze!")
+                        st.warning("No data.")
             
             st.divider()
-            if st.button("Logout", use_container_width=True):
+            if st.button("Logout"):
                 st.session_state['logged_in'] = False
                 st.rerun()
 
-        if nav_mode == "🔄 Project Sync":
-            st.header("🔗 Google Sheets Integration")
-            if st.button("🚀 Sync Projects Now", type="primary"):
-                with st.spinner("Connecting..."):
+        # --- VIEW: SYNC ---
+        if nav_mode == "🔄 Sync Roadmap":
+            st.header("🔗 Google Sheets Sync")
+            if st.button("🚀 Pull Latest Roadmap", type="primary"):
+                with st.spinner("Syncing..."):
                     success, msg = sync_projects()
                     if success: st.success(msg)
                     else: st.error(msg)
-            projects = get_projects()
-            if projects:
-                st.write(f"**Active Projects ({len(projects)}):**")
-                st.dataframe(projects, use_container_width=True)
 
-        elif nav_mode == "➕ Create Task":
+        # --- VIEW: NEW TASK ---
+        elif nav_mode == "➕ New Task":
             st.header("✨ Create New Task")
             with st.container(border=True):
-                project_list = get_projects()
-                selected_project = st.selectbox("📂 Project (Optional)", ["General"] + project_list)
-                c1, c2 = st.columns([1, 3])
+                c1, c2 = st.columns([2, 1])
                 with c1:
-                    assign_type = st.radio("Assign To:", ["Myself", "Teammate"], horizontal=True)
-                    target_user = st.selectbox("Select User", [m for m in TEAM_MEMBERS if m != current_user]) if assign_type == "Teammate" else current_user
+                    desc = st.text_input("Task Description", placeholder="What needs to be done?")
                 with c2:
-                    desc = st.text_input("Task Description", placeholder="e.g. Fix API Error")
-                
-                c3, c4 = st.columns(2)
-                with c3:
-                    prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
-                with c4:
-                    due = st.date_input("Target Date (Default: Today)", value=None)
-                
-                if st.button("🚀 Add Task", type="primary", use_container_width=True):
-                    if desc:
-                        if add_task(current_user, target_user, desc, prio, due, selected_project):
-                            st.balloons()
-                            st.success("✅ Task Added!")
-                    else:
-                        st.warning("⚠️ Enter a description.")
+                    project_list = get_projects()
+                    selected_project = st.selectbox("Project", ["General"] + project_list)
 
-        elif nav_mode == "📔 Your Diary":
-            st.title("📔 Your Diary")
-            df = get_tasks(current_user, is_admin)
+                c3, c4, c5 = st.columns(3)
+                with c3:
+                    assign_to = st.selectbox("Assign To", TEAM_MEMBERS, index=TEAM_MEMBERS.index(current_user) if current_user in TEAM_MEMBERS else 0)
+                with c4:
+                    prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
+                with c5:
+                    due = st.date_input("Due Date", value=date.today())
+                
+                if st.button("Add Task", type="primary", use_container_width=True):
+                    if desc:
+                        if add_task(current_user, assign_to, desc, prio, due, selected_project):
+                            st.toast("✅ Task Created Successfully!")
+                    else:
+                        st.warning("Description required.")
+
+        # --- VIEW: DIARY (THE MSK DASHBOARD) ---
+        elif nav_mode == "📔 My Diary":
+            st.title("📔 Operational Diary")
             
+            df = get_tasks(current_user, is_admin)
             if not df.empty:
                 df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
                 today_ts = pd.Timestamp.now().normalize()
-                
-                if 'filter_view' not in st.session_state: st.session_state['filter_view'] = 'All'
-
-                c1, c2, c3, c4 = st.columns(4)
-                if c1.button("📂 All Pending"): st.session_state['filter_view'] = 'All'
-                if c2.button("⚡ Today"): st.session_state['filter_view'] = 'Today'
-                if c3.button("📅 Tomorrow"): st.session_state['filter_view'] = 'Tomorrow'
-                if c4.button("🚨 Overdue"): st.session_state['filter_view'] = 'Overdue'
-
-                view = st.session_state['filter_view']
                 active_df = df[df['status'] != 'Completed'].copy()
-                
-                if view == 'Today': filtered_df = active_df[active_df['due_date'] == today_ts]
-                elif view == 'Tomorrow': filtered_df = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
-                elif view == 'Overdue': filtered_df = active_df[active_df['due_date'] < today_ts]
-                else: filtered_df = active_df
 
-                if filtered_df.empty:
-                    st.success("🎉 List empty!")
-                else:
-                    filtered_df = filtered_df.sort_values(by=["due_date", "priority"], ascending=[True, True])
-                    for index, row in filtered_df.iterrows():
-                        with st.container(border=True):
-                            c1, c2, c3 = st.columns([3, 5, 2])
+                # TABS FOR FILTERING (Saves space, looks professional)
+                tab1, tab2, tab3, tab4 = st.tabs(["📂 ALL PENDING", "⚡ TODAY", "📅 TOMORROW", "🚨 OVERDUE"])
+                
+                def render_task_list(filter_type):
+                    if filter_type == 'Today': 
+                        filtered = active_df[active_df['due_date'] == today_ts]
+                    elif filter_type == 'Tomorrow': 
+                        filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
+                    elif filter_type == 'Overdue': 
+                        filtered = active_df[active_df['due_date'] < today_ts]
+                    else: 
+                        filtered = active_df
+                    
+                    if filtered.empty:
+                        st.info("✅ No tasks here. Good job!")
+                        return
+
+                    # Sorting: Overdue & High Priority first
+                    filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
+                    
+                    # THE MSK COMPACT LIST
+                    for index, row in filtered.iterrows():
+                        # Create a clean header string
+                        d_str = row['due_date'].strftime('%d-%b')
+                        proj = row['project_ref'] if row['project_ref'] else "General"
+                        priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
+                        
+                        # THE EXPANDER: This makes it compact!
+                        # Header shows the Summary. Click to see details.
+                        with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']}  _({proj})_"):
+                            c1, c2 = st.columns([3, 1])
                             with c1:
-                                date_str = row['due_date'].strftime('%d-%b') if pd.notnull(row['due_date']) else "No Date"
-                                st.markdown(f"**📅 {date_str}**")
-                                proj = row['project_ref'] if row['project_ref'] else "General"
-                                if len(proj) > 15: proj = proj[:15] + ".."
-                                st.caption(f"{row['priority']} | {proj}")
+                                st.caption(f"Assigned by: {row['created_by']}")
+                                if row['staff_remarks']: st.info(f"Last Remark: {row['staff_remarks']}")
+                                new_rem = st.text_input("Update Remark", key=f"r_{row['id']}")
                             with c2:
-                                st.markdown(f"**{row['task_desc']}**")
-                                if row['staff_remarks']: st.caption(f"📝 {row['staff_remarks']}")
-                                new_rem = st.text_input("Remark", key=f"r_{row['id']}", label_visibility="collapsed", placeholder="Add update...")
-                                if new_rem: update_task_status(row['id'], row['status'], new_rem)
-                            with c3:
-                                if st.button("✅ Done", key=f"d_{row['id']}", type="primary", use_container_width=True):
-                                    update_task_status(row['id'], "Completed")
+                                st.write("") # Spacer
+                                st.write("")
+                                if st.button("Mark Done", key=f"d_{row['id']}", type="primary", use_container_width=True):
+                                    remark_to_save = new_rem if new_rem else row['staff_remarks']
+                                    update_task_status(row['id'], "Completed", remark_to_save)
                                     st.rerun()
+
+                with tab1: render_task_list('All')
+                with tab2: render_task_list('Today')
+                with tab3: render_task_list('Tomorrow')
+                with tab4: render_task_list('Overdue')
+
             else:
-                st.info("👋 No tasks found.")
+                st.info("👋 Welcome! You have no tasks. Go to 'New Task' to create one.")
 
 if __name__ == "__main__":
     main()
