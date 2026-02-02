@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 from langchain_google_genai import ChatGoogleGenerativeAI
+from streamlit_option_menu import option_menu
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
@@ -168,15 +169,30 @@ def main():
         current_user = st.session_state['user']
         is_admin = (current_user == ADMIN_EMAIL)
         
+        # --- SIDEBAR (NEW PROFESSIONAL DESIGN) ---
         with st.sidebar:
-            st.title("🎛️ Command Ctr")
-            st.caption(f"Logged in as: {current_user}")
-            nav_mode = st.radio("Navigate", ["📔 My Diary", "➕ New Task", "🔄 Sync Roadmap"])
+            st.markdown(f"### 💼 RBS Workspace")
+            st.caption(f"User: {current_user.split('@')[0].title()}")
+            
+            # THE MODERN MENU
+            nav_mode = option_menu(
+                menu_title=None, 
+                options=["My Diary", "New Task", "Sync Roadmap"], 
+                icons=["journal-bookmark", "plus-circle", "cloud-arrow-down"], 
+                menu_icon="cast", 
+                default_index=0,
+                styles={
+                    "container": {"padding": "0!important", "background-color": "#fafafa"},
+                    "icon": {"color": "black", "font-size": "16px"}, 
+                    "nav-link": {"font-size": "14px", "text-align": "left", "margin":"0px", "--hover-color": "#eee"},
+                    "nav-link-selected": {"background-color": "#ff4b4b"},
+                }
+            )
+            
             st.divider()
             
-            # AI SECTION
-            st.subheader("✨ AI Insight")
-            if st.button("Run Daily Briefing"):
+            st.markdown("**🤖 Assistant**")
+            if st.button("Generate Briefing", use_container_width=True):
                 with st.spinner("Analyzing..."):
                     my_tasks = get_tasks(current_user, is_admin)
                     if not my_tasks.empty:
@@ -184,13 +200,13 @@ def main():
                     else:
                         st.warning("No data.")
             
-            st.divider()
-            if st.button("Logout"):
+            st.write("") 
+            if st.button("Logout", use_container_width=True):
                 st.session_state['logged_in'] = False
                 st.rerun()
 
         # --- VIEW: SYNC ---
-        if nav_mode == "🔄 Sync Roadmap":
+        if nav_mode == "Sync Roadmap":
             st.header("🔗 Google Sheets Sync")
             if st.button("🚀 Pull Latest Roadmap", type="primary"):
                 with st.spinner("Syncing..."):
@@ -199,7 +215,7 @@ def main():
                     else: st.error(msg)
 
         # --- VIEW: NEW TASK ---
-        elif nav_mode == "➕ New Task":
+        elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             with st.container(border=True):
                 c1, c2 = st.columns([2, 1])
@@ -224,8 +240,8 @@ def main():
                     else:
                         st.warning("Description required.")
 
-        # --- VIEW: DIARY (THE MSK DASHBOARD) ---
-        elif nav_mode == "📔 My Diary":
+        # --- VIEW: DIARY ---
+        elif nav_mode == "My Diary":
             st.title("📔 My Diary")
             
             df = get_tasks(current_user, is_admin)
@@ -234,7 +250,7 @@ def main():
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
 
-                # TABS FOR FILTERING (Saves space, looks professional)
+                # TABS
                 tab1, tab2, tab3, tab4 = st.tabs(["📂 ALL PENDING", "⚡ TODAY", "📅 TOMORROW", "🚨 OVERDUE"])
                 
                 def render_task_list(filter_type):
@@ -251,29 +267,22 @@ def main():
                         st.info("✅ No tasks here. Good job!")
                         return
 
-                    # Sorting: Overdue & High Priority first
                     filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
                     
-                    # THE MSK COMPACT LIST
                     for index, row in filtered.iterrows():
-                        # Create a clean header string
                         d_str = row['due_date'].strftime('%d-%b')
                         proj = row['project_ref'] if row['project_ref'] else "General"
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                         
-                        # THE EXPANDER: This makes it compact!
-                        # Header shows the Summary. Click to see details.
                         with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']}  _({proj})_"):
                             c1, c2 = st.columns([3, 1])
                             with c1:
                                 st.caption(f"Assigned by: {row['created_by']}")
                                 if row['staff_remarks']: st.info(f"Last Remark: {row['staff_remarks']}")
-                                # UNIQUE KEY FIX: Added filter_type to the key
                                 new_rem = st.text_input("Update Remark", key=f"r_{row['id']}_{filter_type}")
                             with c2:
-                                st.write("") # Spacer
+                                st.write("") 
                                 st.write("")
-                                # UNIQUE KEY FIX: Added filter_type to the key
                                 if st.button("Mark Done", key=f"d_{row['id']}_{filter_type}", type="primary", use_container_width=True):
                                     remark_to_save = new_rem if new_rem else row['staff_remarks']
                                     update_task_status(row['id'], "Completed", remark_to_save)
@@ -283,7 +292,6 @@ def main():
                 with tab2: render_task_list('Today')
                 with tab3: render_task_list('Tomorrow')
                 with tab4: render_task_list('Overdue')
-
             else:
                 st.info("👋 Welcome! You have no tasks. Go to 'New Task' to create one.")
 
