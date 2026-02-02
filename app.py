@@ -12,7 +12,7 @@ st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
 # --- MSK STYLE CSS (COMPACT & CLEAN) ---
 st.markdown("""
 <style>
-    /* Reduce main padding */
+    /* Reduce main padding to make it look like an app */
     .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
     
     /* Compact Text */
@@ -30,7 +30,7 @@ st.markdown("""
     /* Button Styling */
     .stButton button { width: 100%; border-radius: 5px; height: 2.5rem; }
     
-    /* Sidebar Compact */
+    /* Remove sidebar padding */
     section[data-testid="stSidebar"] .block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -46,7 +46,6 @@ try:
     SUPABASE_URL = st.secrets["connections.supabase"]["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["connections.supabase"]["SUPABASE_KEY"]
 except:
-    # Fallback for old secrets format
     try:
         SUPABASE_URL = st.secrets["SUPABASE_URL"]
         SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -113,7 +112,6 @@ def get_projects():
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref):
     try:
         final_date = str(due_date) if due_date else str(date.today())
-        # Ensure project_ref is not empty
         final_project = project_ref if project_ref else "General"
         data = {
             "created_by": created_by,
@@ -169,12 +167,12 @@ def main():
         current_user = st.session_state['user']
         is_admin = (current_user == ADMIN_EMAIL)
         
-        # --- SIDEBAR (NEW PROFESSIONAL DESIGN) ---
+        # --- PROFESSIONAL SIDEBAR NAVIGATION ---
         with st.sidebar:
             st.markdown(f"### 💼 RBS Workspace")
             st.caption(f"User: {current_user.split('@')[0].title()}")
             
-            # THE MODERN MENU
+            # MODERN OPTION MENU
             nav_mode = option_menu(
                 menu_title=None, 
                 options=["My Diary", "New Task", "Sync Roadmap"], 
@@ -250,23 +248,34 @@ def main():
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
 
-                # TABS
-                tab1, tab2, tab3, tab4 = st.tabs(["📂 ALL PENDING", "⚡ TODAY", "📅 TOMORROW", "🚨 OVERDUE"])
-                
-                def render_task_list(filter_type):
-                    if filter_type == 'Today': 
-                        filtered = active_df[active_df['due_date'] == today_ts]
-                    elif filter_type == 'Tomorrow': 
-                        filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
-                    elif filter_type == 'Overdue': 
-                        filtered = active_df[active_df['due_date'] < today_ts]
-                    else: 
-                        filtered = active_df
-                    
-                    if filtered.empty:
-                        st.info("✅ No tasks here. Good job!")
-                        return
+                # --- NEW HORIZONTAL MENU FILTER (REPLACES TABS) ---
+                selected_filter = option_menu(
+                    menu_title=None,
+                    options=["All Pending", "Today", "Tomorrow", "Overdue"],
+                    icons=["folder", "lightning", "calendar", "exclamation-triangle"],
+                    orientation="horizontal",
+                    styles={
+                        "container": {"padding": "0!important", "background-color": "#fafafa"},
+                        "nav-link": {"font-size": "14px", "margin":"0px", "--hover-color": "#eee"},
+                        "nav-link-selected": {"background-color": "#ff4b4b"},
+                    }
+                )
 
+                # FILTER LOGIC
+                if selected_filter == 'Today': 
+                    filtered = active_df[active_df['due_date'] == today_ts]
+                elif selected_filter == 'Tomorrow': 
+                    filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
+                elif selected_filter == 'Overdue': 
+                    filtered = active_df[active_df['due_date'] < today_ts]
+                else: 
+                    filtered = active_df
+                
+                st.write("") # Spacer
+
+                if filtered.empty:
+                    st.info(f"✅ No tasks found for '{selected_filter}'. Good job!")
+                else:
                     filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
                     
                     for index, row in filtered.iterrows():
@@ -274,24 +283,21 @@ def main():
                         proj = row['project_ref'] if row['project_ref'] else "General"
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                         
+                        # Use selected_filter as part of the key to prevent duplicates
                         with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']}  _({proj})_"):
                             c1, c2 = st.columns([3, 1])
                             with c1:
                                 st.caption(f"Assigned by: {row['created_by']}")
                                 if row['staff_remarks']: st.info(f"Last Remark: {row['staff_remarks']}")
-                                new_rem = st.text_input("Update Remark", key=f"r_{row['id']}_{filter_type}")
+                                new_rem = st.text_input("Update Remark", key=f"r_{row['id']}_{selected_filter}")
                             with c2:
                                 st.write("") 
                                 st.write("")
-                                if st.button("Mark Done", key=f"d_{row['id']}_{filter_type}", type="primary", use_container_width=True):
+                                if st.button("Mark Done", key=f"d_{row['id']}_{selected_filter}", type="primary", use_container_width=True):
                                     remark_to_save = new_rem if new_rem else row['staff_remarks']
                                     update_task_status(row['id'], "Completed", remark_to_save)
                                     st.rerun()
 
-                with tab1: render_task_list('All')
-                with tab2: render_task_list('Today')
-                with tab3: render_task_list('Tomorrow')
-                with tab4: render_task_list('Overdue')
             else:
                 st.info("👋 Welcome! You have no tasks. Go to 'New Task' to create one.")
 
