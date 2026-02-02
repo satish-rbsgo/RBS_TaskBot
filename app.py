@@ -9,37 +9,28 @@ from streamlit_option_menu import option_menu
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
 
-# --- MSK STYLE CSS (COMPACT & CLEAN) ---
+# --- MSK STYLE CSS ---
 st.markdown("""
 <style>
-    /* Reduce main padding to make it look like an app */
     .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
-    
-    /* Compact Text */
     p, .stMarkdown { font-size: 14px !important; margin-bottom: 0px !important; }
     h1, h2, h3 { margin-bottom: 0.5rem !important; margin-top: 0rem !important; }
-    
-    /* Tighten Expanders (The Task Rows) */
     .streamlit-expanderHeader { 
-        padding-top: 5px !important; 
-        padding-bottom: 5px !important; 
-        background-color: #f0f2f6; 
-        border-radius: 5px;
+        padding-top: 5px !important; padding-bottom: 5px !important; 
+        background-color: #f0f2f6; border-radius: 5px;
     }
-    
-    /* Button Styling */
     .stButton button { width: 100%; border-radius: 5px; height: 2.5rem; }
-    
-    /* Remove sidebar padding */
     section[data-testid="stSidebar"] .block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIGURATION ---
+# --- 1. DEFINE HIERARCHY ---
+# Exact emails for RBAC
+MANAGERS = ["satish.m@rbsgo.com", "sriram@rbsgo.com", "msk@rbsgo.com"] 
+TEAM_MEMBERS = ["satish.m@rbsgo.com", "sriram@rbsgo.com", "msk@rbsgo.com", 
+                "praveen@rbsgo.com", "arjun@rbsgo.com", "prasanna@rbsgo.com", 
+                "chris@rbsgo.com", "sarah@rbsgo.com"]
 COMPANY_DOMAIN = "@rbsgo.com"
-ADMIN_EMAIL = "msk@rbsgo.com"
-TEAM_MEMBERS = ["msk@rbsgo.com", "praveen@rbsgo.com", "arjun@rbsgo.com", 
-                "prasanna@rbsgo.com", "chris@rbsgo.com", "sarah@rbsgo.com"]
 
 # --- SECURE CONNECTION ---
 try:
@@ -49,7 +40,7 @@ except:
     try:
         SUPABASE_URL = st.secrets["SUPABASE_URL"]
         SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-    except FileNotFoundError:
+    except:
         st.error("🚨 Secrets not found!")
         st.stop()
 
@@ -59,30 +50,28 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- GEMINI AI SETUP ---
+# --- GEMINI AI ---
 def get_ai_summary(task_dataframe):
     try:
         if "GOOGLE_API_KEY" in st.secrets:
             api_key = st.secrets["GOOGLE_API_KEY"]
         else:
             return "⚠️ Google API Key missing."
-            
         llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=api_key)
         task_text = task_dataframe.to_string(index=False)
         prompt = f"""
-        You are an executive assistant. Here is the task list:
-        {task_text}
-        Provide a 3-bullet executive summary: 
+        Act as a Project Manager. Summarize this task list in 3 bullet points:
         1. Critical Bottlenecks (Overdue/High Priority)
         2. Today's Focus
-        3. A quick motivational one-liner.
+        3. Motivational one-liner.
+        Tasks: {task_text}
         """
         response = llm.invoke(prompt)
         return response.content
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# --- SYNC & DATA FUNCTIONS ---
+# --- DATA FUNCTIONS ---
 def sync_projects():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
@@ -130,10 +119,12 @@ def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref
         st.error(f"Error: {e}")
         return False
 
-def get_tasks(user_email, is_admin=False):
+def get_tasks(target_email=None):
+    # If target_email is None, fetch ALL tasks (Manager View All)
+    # If target_email is set, fetch only that user's tasks
     query = supabase.table("tasks").select("*")
-    if not is_admin:
-        query = query.eq("assigned_to", user_email)
+    if target_email:
+        query = query.eq("assigned_to", target_email)
     response = query.execute()
     return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
@@ -159,42 +150,55 @@ def main():
                 if st.button("Login", use_container_width=True):
                     if email.endswith(COMPANY_DOMAIN):
                         st.session_state['logged_in'] = True
-                        st.session_state['user'] = email
+                        st.session_state['user'] = email.lower().strip()
                         st.rerun()
                     else:
                         st.error(f"Restricted Access. {COMPANY_DOMAIN} only.")
     else:
         current_user = st.session_state['user']
-        is_admin = (current_user == ADMIN_EMAIL)
+        # Check if current user is a manager
+        is_manager = current_user in MANAGERS
         
-        # --- PROFESSIONAL SIDEBAR NAVIGATION ---
+        # --- SIDEBAR ---
         with st.sidebar:
             st.markdown(f"### 💼 RBS Workspace")
-            st.caption(f"User: {current_user.split('@')[0].title()}")
+            role_label = "Manager" if is_manager else "Team Member"
+            st.caption(f"{current_user} ({role_label})")
             
-            # MODERN OPTION MENU
+            # DYNAMIC MENU: Hide 'Sync' for non-managers
+            menu_options = ["My Diary", "New Task"]
+            menu_icons = ["journal-bookmark", "plus-circle"]
+            
+            if is_manager:
+                menu_options.append("Sync Roadmap")
+                menu_icons.append("cloud-arrow-down")
+
             nav_mode = option_menu(
                 menu_title=None, 
-                options=["My Diary", "New Task", "Sync Roadmap"], 
-                icons=["journal-bookmark", "plus-circle", "cloud-arrow-down"], 
+                options=menu_options, 
+                icons=menu_icons, 
                 menu_icon="cast", 
                 default_index=0,
                 styles={
                     "container": {"padding": "0!important", "background-color": "#fafafa"},
                     "icon": {"color": "black", "font-size": "16px"}, 
-                    "nav-link": {"font-size": "14px", "text-align": "left", "margin":"0px", "--hover-color": "#eee"},
+                    "nav-link": {"font-size": "14px", "text-align": "left", "margin":"0px"},
                     "nav-link-selected": {"background-color": "#ff4b4b"},
                 }
             )
             
             st.divider()
             
+            # AI Briefing
             st.markdown("**🤖 Assistant**")
             if st.button("Generate Briefing", use_container_width=True):
                 with st.spinner("Analyzing..."):
-                    my_tasks = get_tasks(current_user, is_admin)
-                    if not my_tasks.empty:
-                        st.info(get_ai_summary(my_tasks))
+                    # Managers analyze ALL tasks if in 'All' view logic, or just personal. 
+                    # Simplicity: Managers analyze what they see. 
+                    # Let's pull 'All' for managers to give a big picture summary.
+                    tasks_to_analyze = get_tasks(None) if is_manager else get_tasks(current_user)
+                    if not tasks_to_analyze.empty:
+                        st.info(get_ai_summary(tasks_to_analyze))
                     else:
                         st.warning("No data.")
             
@@ -203,9 +207,10 @@ def main():
                 st.session_state['logged_in'] = False
                 st.rerun()
 
-        # --- VIEW: SYNC ---
-        if nav_mode == "Sync Roadmap":
+        # --- VIEW: SYNC (Managers Only) ---
+        if nav_mode == "Sync Roadmap" and is_manager:
             st.header("🔗 Google Sheets Sync")
+            st.info("Update your Google Sheet 'ROADMAP' tab, then click below.")
             if st.button("🚀 Pull Latest Roadmap", type="primary"):
                 with st.spinner("Syncing..."):
                     success, msg = sync_projects()
@@ -225,7 +230,12 @@ def main():
 
                 c3, c4, c5 = st.columns(3)
                 with c3:
-                    assign_to = st.selectbox("Assign To", TEAM_MEMBERS, index=TEAM_MEMBERS.index(current_user) if current_user in TEAM_MEMBERS else 0)
+                    # MANAGER LOGIC: Can assign to anyone. TEAM LOGIC: Locked to self.
+                    if is_manager:
+                        assign_to = st.selectbox("Assign To", TEAM_MEMBERS)
+                    else:
+                        assign_to = st.selectbox("Assign To", [current_user], disabled=True)
+                
                 with c4:
                     prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
                 with c5:
@@ -234,46 +244,56 @@ def main():
                 if st.button("Add Task", type="primary", use_container_width=True):
                     if desc:
                         if add_task(current_user, assign_to, desc, prio, due, selected_project):
-                            st.toast("✅ Task Created Successfully!")
+                            st.toast(f"✅ Task assigned to {assign_to}!")
                     else:
                         st.warning("Description required.")
 
         # --- VIEW: DIARY ---
         elif nav_mode == "My Diary":
-            st.title("📔 My Diary")
             
-            df = get_tasks(current_user, is_admin)
+            # MANAGER LOGIC: Filter Dropdown
+            df = pd.DataFrame()
+            if is_manager:
+                c_filter, c_title = st.columns([1, 3])
+                with c_filter:
+                    view_target = st.selectbox("View Diary For:", ["All Users"] + TEAM_MEMBERS)
+                with c_title:
+                    st.title("📔 Operational Diary")
+                
+                # Fetch data based on filter
+                if view_target == "All Users":
+                    df = get_tasks(None) # Get All
+                else:
+                    df = get_tasks(view_target) # Get Specific User
+            else:
+                st.title("📔 My Diary")
+                df = get_tasks(current_user) # Team sees only own
+            
+            # --- RENDER LIST ---
             if not df.empty:
                 df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
 
-                # --- CALCULATE COUNTS FOR BADGES ---
+                # CALCULATE COUNTS (The Fancy Badges)
                 c_all = len(active_df)
                 c_today = len(active_df[active_df['due_date'] == today_ts])
                 c_tmrw = len(active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)])
                 c_over = len(active_df[active_df['due_date'] < today_ts])
 
-                # Dynamic Option Names
                 opt_all = f"All Pending ({c_all})"
                 opt_today = f"Today ({c_today})"
                 opt_tmrw = f"Tomorrow ({c_tmrw})"
                 opt_over = f"Overdue ({c_over})"
 
-                # --- NEW HORIZONTAL MENU WITH COUNTS ---
                 selected_filter = option_menu(
                     menu_title=None,
                     options=[opt_all, opt_today, opt_tmrw, opt_over],
                     icons=["folder", "lightning", "calendar", "exclamation-triangle"],
                     orientation="horizontal",
-                    styles={
-                        "container": {"padding": "0!important", "background-color": "#fafafa"},
-                        "nav-link": {"font-size": "14px", "margin":"0px", "--hover-color": "#eee"},
-                        "nav-link-selected": {"background-color": "#ff4b4b"},
-                    }
+                    styles={"container": {"padding": "0!important", "background-color": "#fafafa"}}
                 )
 
-                # FILTER LOGIC (Matching the dynamic variables)
                 if selected_filter == opt_today: 
                     filtered = active_df[active_df['due_date'] == today_ts]
                 elif selected_filter == opt_tmrw: 
@@ -283,35 +303,35 @@ def main():
                 else: 
                     filtered = active_df
                 
-                st.write("") # Spacer
+                st.write("") 
 
                 if filtered.empty:
-                    st.info(f"✅ No tasks found for '{selected_filter}'. Good job!")
+                    st.info(f"✅ No tasks found for '{selected_filter}'.")
                 else:
                     filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
-                    
                     for index, row in filtered.iterrows():
                         d_str = row['due_date'].strftime('%d-%b')
                         proj = row['project_ref'] if row['project_ref'] else "General"
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                         
-                        # Use selected_filter as part of the key to prevent duplicates
-                        with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']}  _({proj})_"):
+                        # Show who the task is assigned to if viewing "All Users"
+                        assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and 'assigned_to' in row) else ""
+
+                        with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
                             c1, c2 = st.columns([3, 1])
                             with c1:
-                                st.caption(f"Assigned by: {row['created_by']}")
-                                if row['staff_remarks']: st.info(f"Last Remark: {row['staff_remarks']}")
-                                new_rem = st.text_input("Update Remark", key=f"r_{row['id']}_{selected_filter}")
+                                st.caption(f"Created by: {row['created_by']}")
+                                if row['staff_remarks']: st.info(f"Remark: {row['staff_remarks']}")
+                                new_rem = st.text_input("Update", key=f"r_{row['id']}_{selected_filter}")
                             with c2:
-                                st.write("") 
                                 st.write("")
-                                if st.button("Mark Done", key=f"d_{row['id']}_{selected_filter}", type="primary", use_container_width=True):
+                                st.write("") 
+                                if st.button("Mark Done", key=f"d_{row['id']}_{selected_filter}", type="primary"):
                                     remark_to_save = new_rem if new_rem else row['staff_remarks']
                                     update_task_status(row['id'], "Completed", remark_to_save)
                                     st.rerun()
-
             else:
-                st.info("👋 Welcome! You have no tasks. Go to 'New Task' to create one.")
+                st.info("👋 No active tasks found.")
 
 if __name__ == "__main__":
     main()
