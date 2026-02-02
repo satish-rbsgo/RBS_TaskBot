@@ -226,7 +226,7 @@ def main():
 
         # --- VIEW: DIARY (THE MSK DASHBOARD) ---
         elif nav_mode == "📔 My Diary":
-            st.title("📔 Operational Diary")
+            st.title("📔 My Diary")
             
             df = get_tasks(current_user, is_admin)
             if not df.empty:
