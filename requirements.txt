@@ -1,4 +1,5 @@
 streamlit
+streamlit-option-menu
 langchain
 langchain-google-genai
 python-dotenv
