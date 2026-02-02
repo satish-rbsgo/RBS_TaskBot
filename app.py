@@ -268,11 +268,13 @@ def main():
                             with c1:
                                 st.caption(f"Assigned by: {row['created_by']}")
                                 if row['staff_remarks']: st.info(f"Last Remark: {row['staff_remarks']}")
-                                new_rem = st.text_input("Update Remark", key=f"r_{row['id']}")
+                                # UNIQUE KEY FIX: Added filter_type to the key
+                                new_rem = st.text_input("Update Remark", key=f"r_{row['id']}_{filter_type}")
                             with c2:
                                 st.write("") # Spacer
                                 st.write("")
-                                if st.button("Mark Done", key=f"d_{row['id']}", type="primary", use_container_width=True):
+                                # UNIQUE KEY FIX: Added filter_type to the key
+                                if st.button("Mark Done", key=f"d_{row['id']}_{filter_type}", type="primary", use_container_width=True):
                                     remark_to_save = new_rem if new_rem else row['staff_remarks']
                                     update_task_status(row['id'], "Completed", remark_to_save)
                                     st.rerun()
