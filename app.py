@@ -24,12 +24,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. DEFINE HIERARCHY ---
-# Exact emails for RBAC
+# --- 1. ACCESS CONTROL LISTS (The Master Logic) ---
+# Managers: Can Sync, View All Diaries, Assign to Anyone
 MANAGERS = ["satish.m@rbsgo.com", "sriram@rbsgo.com", "msk@rbsgo.com"] 
-TEAM_MEMBERS = ["satish.m@rbsgo.com", "sriram@rbsgo.com", "msk@rbsgo.com", 
-                "praveen@rbsgo.com", "arjun@rbsgo.com", "prasanna@rbsgo.com", 
-                "chris@rbsgo.com", "sarah@rbsgo.com"]
+
+# All Authorized Users: Can Login
+TEAM_MEMBERS = [
+    "satish.m@rbsgo.com", "sriram@rbsgo.com", "msk@rbsgo.com",
+    "praveen@rbsgo.com", "arjun@rbsgo.com", "prasanna@rbsgo.com", 
+    "chris@rbsgo.com", "sarah@rbsgo.com"
+]
 COMPANY_DOMAIN = "@rbsgo.com"
 
 # --- SECURE CONNECTION ---
@@ -120,8 +124,8 @@ def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref
         return False
 
 def get_tasks(target_email=None):
-    # If target_email is None, fetch ALL tasks (Manager View All)
-    # If target_email is set, fetch only that user's tasks
+    # Logic: If target_email is None, return ALL tasks (for Managers view all)
+    # If target_email is set, filter by that user
     query = supabase.table("tasks").select("*")
     if target_email:
         query = query.eq("assigned_to", target_email)
@@ -141,29 +145,38 @@ def update_task_status(task_id, new_status, remarks=None):
 def main():
     if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
 
+    # --- LOGIN SCREEN ---
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.title("🚀 RBS TaskHub")
             with st.container(border=True):
-                email = st.text_input("Enter Work Email:")
+                email_input = st.text_input("Enter Work Email:")
                 if st.button("Login", use_container_width=True):
+                    email = email_input.lower().strip()
+                    # 1. Check Domain
                     if email.endswith(COMPANY_DOMAIN):
-                        st.session_state['logged_in'] = True
-                        st.session_state['user'] = email.lower().strip()
-                        st.rerun()
+                        # 2. Check Access List
+                        if email in TEAM_MEMBERS:
+                            st.session_state['logged_in'] = True
+                            st.session_state['user'] = email
+                            st.rerun()
+                        else:
+                            st.error("🚫 Access Denied. You are not in the Team List.")
                     else:
-                        st.error(f"Restricted Access. {COMPANY_DOMAIN} only.")
+                        st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
+    
+    # --- DASHBOARD ---
     else:
         current_user = st.session_state['user']
-        # Check if current user is a manager
+        # DETERMINE ROLE
         is_manager = current_user in MANAGERS
         
         # --- SIDEBAR ---
         with st.sidebar:
             st.markdown(f"### 💼 RBS Workspace")
             role_label = "Manager" if is_manager else "Team Member"
-            st.caption(f"{current_user} ({role_label})")
+            st.caption(f"{current_user.split('@')[0].title()} ({role_label})")
             
             # DYNAMIC MENU: Hide 'Sync' for non-managers
             menu_options = ["My Diary", "New Task"]
@@ -193,9 +206,7 @@ def main():
             st.markdown("**🤖 Assistant**")
             if st.button("Generate Briefing", use_container_width=True):
                 with st.spinner("Analyzing..."):
-                    # Managers analyze ALL tasks if in 'All' view logic, or just personal. 
-                    # Simplicity: Managers analyze what they see. 
-                    # Let's pull 'All' for managers to give a big picture summary.
+                    # Managers analyze ALL data, Members analyze OWN data
                     tasks_to_analyze = get_tasks(None) if is_manager else get_tasks(current_user)
                     if not tasks_to_analyze.empty:
                         st.info(get_ai_summary(tasks_to_analyze))
@@ -230,9 +241,9 @@ def main():
 
                 c3, c4, c5 = st.columns(3)
                 with c3:
-                    # MANAGER LOGIC: Can assign to anyone. TEAM LOGIC: Locked to self.
+                    # MANAGER LOGIC: Dropdown has everyone. TEAM LOGIC: Locked to self.
                     if is_manager:
-                        assign_to = st.selectbox("Assign To", TEAM_MEMBERS)
+                        assign_to = st.selectbox("Assign To", TEAM_MEMBERS, index=TEAM_MEMBERS.index(current_user) if current_user in TEAM_MEMBERS else 0)
                     else:
                         assign_to = st.selectbox("Assign To", [current_user], disabled=True)
                 
@@ -251,25 +262,28 @@ def main():
         # --- VIEW: DIARY ---
         elif nav_mode == "My Diary":
             
-            # MANAGER LOGIC: Filter Dropdown
+            # 1. FETCH DATA BASED ON ROLE
             df = pd.DataFrame()
+            
             if is_manager:
+                # Manager Layout: Filter Bar + Title
                 c_filter, c_title = st.columns([1, 3])
                 with c_filter:
                     view_target = st.selectbox("View Diary For:", ["All Users"] + TEAM_MEMBERS)
                 with c_title:
                     st.title("📔 Operational Diary")
                 
-                # Fetch data based on filter
+                # Fetch Logic
                 if view_target == "All Users":
                     df = get_tasks(None) # Get All
                 else:
                     df = get_tasks(view_target) # Get Specific User
             else:
+                # Team Layout: Simple Title
                 st.title("📔 My Diary")
-                df = get_tasks(current_user) # Team sees only own
+                df = get_tasks(current_user) # Only Self
             
-            # --- RENDER LIST ---
+            # 2. RENDER THE LIST (Common Logic)
             if not df.empty:
                 df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
                 today_ts = pd.Timestamp.now().normalize()
@@ -294,11 +308,12 @@ def main():
                     styles={"container": {"padding": "0!important", "background-color": "#fafafa"}}
                 )
 
-                if selected_filter == opt_today: 
+                # Filter Logic based on Menu Selection
+                if opt_today in selected_filter: 
                     filtered = active_df[active_df['due_date'] == today_ts]
-                elif selected_filter == opt_tmrw: 
+                elif opt_tmrw in selected_filter: 
                     filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
-                elif selected_filter == opt_over: 
+                elif opt_over in selected_filter: 
                     filtered = active_df[active_df['due_date'] < today_ts]
                 else: 
                     filtered = active_df
@@ -306,7 +321,7 @@ def main():
                 st.write("") 
 
                 if filtered.empty:
-                    st.info(f"✅ No tasks found for '{selected_filter}'.")
+                    st.info(f"✅ No tasks found for this category.")
                 else:
                     filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
                     for index, row in filtered.iterrows():
@@ -314,8 +329,11 @@ def main():
                         proj = row['project_ref'] if row['project_ref'] else "General"
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                         
-                        # Show who the task is assigned to if viewing "All Users"
-                        assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and 'assigned_to' in row) else ""
+                        # If Manager viewing "All", show who owns the task
+                        assign_label = ""
+                        if is_manager and 'assigned_to' in row:
+                             name = row['assigned_to'].split('@')[0].title()
+                             assign_label = f" ➝ 👤 {name}"
 
                         with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
                             c1, c2 = st.columns([3, 1])
