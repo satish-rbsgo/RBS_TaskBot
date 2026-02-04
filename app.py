@@ -68,11 +68,9 @@ def get_active_users():
 def create_new_user(email, name, role):
     """Add a new user to the master table"""
     try:
-        # Check if exists first
         exists = supabase.table("user_master").select("*").eq("email", email).execute()
-        if exists.data:
-            return False, "User already exists!"
-            
+        if exists.data: return False, "User already exists!"
+        
         data = {"email": email, "name": name, "role": role, "status": "active"}
         supabase.table("user_master").insert(data).execute()
         return True, "User added successfully!"
@@ -109,35 +107,27 @@ def get_ai_summary(task_dataframe):
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# --- DATA FUNCTIONS (FIXED FOR YOUR SHEET HEADERS) ---
+# --- DATA FUNCTIONS (SYNC LOGIC) ---
 def sync_projects():
     try:
-        # NOTE: Ensure your Sheet Tab name is exactly 'ROADMAP'
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(worksheet="ROADMAP") 
         count = 0
         
-        # MAPPING BASED ON YOUR SCREENSHOT:
-        # Interface Name -> name
-        # Status -> status
-        # Particulars -> description
-        # Vendor -> vendor
-        
+        # MAPPING: Sheet Columns -> DB Columns
         for index, row in df.iterrows():
-            # Skip empty rows
-            if pd.isna(row['Interface Name']) or row['Interface Name'] == '':
+            if pd.isna(row['Interface Name']) or str(row['Interface Name']).strip() == '':
                 continue
-                
+            
             data = {
-                "name": row['Interface Name'],
-                "status": row['Status'],
-                "description": row.get('Particulars', ''), # Use .get() to handle missing columns safely
-                "vendor": row.get('Vendor', '')
+                "name": str(row['Interface Name']),
+                "status": str(row['Status']),
+                "description": str(row.get('Particulars', '')), 
+                "vendor": str(row.get('Vendor', ''))            
             }
             supabase.table("projects").upsert(data, on_conflict="name").execute()
             count += 1
             
-        # Clear cache so the dropdown updates immediately
         get_projects.clear()
         return True, f"Synced {count} Projects!"
     except Exception as e:
@@ -194,7 +184,6 @@ def main():
     if 'user_role' not in st.session_state: st.session_state['user_role'] = None
     if 'user_name' not in st.session_state: st.session_state['user_name'] = None
 
-    # --- LOGIN SCREEN ---
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -204,9 +193,7 @@ def main():
                 if st.button("Login", use_container_width=True):
                     email = email_input.lower().strip()
                     if email.endswith(COMPANY_DOMAIN):
-                        # DB VERIFICATION
                         user_record = verify_user_in_db(email)
-                        
                         if user_record:
                             st.session_state['logged_in'] = True
                             st.session_state['user'] = user_record['email']
@@ -218,24 +205,19 @@ def main():
                     else:
                         st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
     
-    # --- DASHBOARD ---
     else:
         current_user = st.session_state['user']
         user_role = st.session_state['user_role']
         user_name = st.session_state['user_name']
-        
         is_manager = (user_role == 'manager')
         
-        # --- SIDEBAR ---
         with st.sidebar:
             st.markdown(f"### 💼 RBS Workspace")
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # DYNAMIC MENU
             menu_options = ["My Diary", "New Task"]
             menu_icons = ["journal-bookmark", "plus-circle"]
-            
             if is_manager:
                 menu_options.append("Sync Roadmap")
                 menu_icons.append("cloud-arrow-down")
@@ -269,10 +251,8 @@ def main():
             st.write("") 
             if st.button("Logout", use_container_width=True):
                 st.session_state['logged_in'] = False
-                st.session_state['user_role'] = None
                 st.rerun()
 
-        # --- VIEW: SYNC ---
         if nav_mode == "Sync Roadmap" and is_manager:
             st.header("🔗 Google Sheets Sync")
             st.info("Update your Google Sheet 'ROADMAP' tab, then click below.")
@@ -282,12 +262,9 @@ def main():
                     if success: st.success(msg)
                     else: st.error(msg)
 
-        # --- VIEW: TEAM MASTER ---
         elif nav_mode == "Team Master" and is_manager:
             st.title("👥 Team Master")
-            
             with st.expander("➕ Add New User", expanded=True):
-                # FIX: clear_on_submit=True resets inputs after adding
                 with st.form("add_user", clear_on_submit=True):
                     c1, c2, c3 = st.columns(3)
                     new_name = c1.text_input("Name")
@@ -316,7 +293,6 @@ def main():
                         c1.write(f"**{u['name']}**")
                         c2.write(f"`{u['email']}`")
                         c3.caption(f"_{u['role']}_")
-                        
                         btn_label = "🔴 Deactivate" if u['status'] == 'active' else "🟢 Activate"
                         if c4.button(btn_label, key=f"tog_{u['email']}"):
                             toggle_user_status(u['email'], u['status'])
@@ -324,7 +300,6 @@ def main():
             else:
                 st.info("No users found.")
 
-        # --- VIEW: NEW TASK ---
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             with st.container(border=True):
@@ -332,7 +307,6 @@ def main():
                 with c1:
                     desc = st.text_input("Task Description", placeholder="What needs to be done?")
                 with c2:
-                    # FIX: Projects loaded from DB
                     project_list = get_projects()
                     selected_project = st.selectbox("Project", ["General"] + project_list)
 
@@ -356,9 +330,7 @@ def main():
                     else:
                         st.warning("Description required.")
 
-        # --- VIEW: DIARY ---
         elif nav_mode == "My Diary":
-            
             df = pd.DataFrame()
             if is_manager:
                 c_filter, c_title = st.columns([1, 3])
@@ -416,12 +388,9 @@ def main():
                     filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
                     for index, row in filtered.iterrows():
                         d_str = row['due_date'].strftime('%d-%b')
-                        
                         proj = row.get('project_ref', 'General') 
                         if not proj: proj = "General"
-
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
-                        
                         assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and 'assigned_to' in row) else ""
 
                         with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
