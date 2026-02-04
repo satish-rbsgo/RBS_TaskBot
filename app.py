@@ -107,31 +107,54 @@ def get_ai_summary(task_dataframe):
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# --- DATA FUNCTIONS (SYNC LOGIC) ---
+# --- DATA FUNCTIONS (CRASH PROOF SYNC) ---
 def sync_projects():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(worksheet="ROADMAP") 
         count = 0
         
-        # MAPPING: Sheet Columns -> DB Columns
+        # 1. Validation: Check if sheet is empty
+        if df.empty:
+            return False, "⚠️ Google Sheet is empty or tab 'ROADMAP' not found."
+
+        # 2. Iterate
         for index, row in df.iterrows():
-            if pd.isna(row['Interface Name']) or str(row['Interface Name']).strip() == '':
+            # Check for empty Interface Name
+            if pd.isna(row.get('Interface Name')) or str(row.get('Interface Name')).strip() == '':
                 continue
             
+            # 3. CRITICAL: Clean Data (Convert NaN to empty strings to prevent HTTP 400)
+            def clean_val(val):
+                if pd.isna(val): return ""
+                return str(val).strip()
+
+            p_name = clean_val(row.get('Interface Name'))
+            p_status = clean_val(row.get('Status'))
+            p_desc = clean_val(row.get('Particulars')) # Maps 'Particulars' -> 'description'
+            p_vendor = clean_val(row.get('Vendor'))    # Maps 'Vendor' -> 'vendor'
+
             data = {
-                "name": str(row['Interface Name']),
-                "status": str(row['Status']),
-                "description": str(row.get('Particulars', '')), 
-                "vendor": str(row.get('Vendor', ''))            
+                "name": p_name,
+                "status": p_status,
+                "description": p_desc,
+                "vendor": p_vendor
             }
-            supabase.table("projects").upsert(data, on_conflict="name").execute()
-            count += 1
             
-        get_projects.clear()
-        return True, f"Synced {count} Projects!"
+            # 4. Safe Upsert
+            try:
+                supabase.table("projects").upsert(data, on_conflict="name").execute()
+                count += 1
+            except Exception as row_error:
+                # If a specific row fails, log it but continue syncing others
+                print(f"Skipped row {p_name}: {row_error}")
+                continue
+            
+        get_projects.clear() # Clear cache
+        return True, f"✅ Successfully Synced {count} Projects!"
+        
     except Exception as e:
-        return False, f"Sync Error: {str(e)}"
+        return False, f"❌ Sync Failed. Detail: {str(e)}"
 
 @st.cache_data(ttl=60)
 def get_projects():
@@ -184,6 +207,7 @@ def main():
     if 'user_role' not in st.session_state: st.session_state['user_role'] = None
     if 'user_name' not in st.session_state: st.session_state['user_name'] = None
 
+    # --- LOGIN SCREEN ---
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -205,6 +229,7 @@ def main():
                     else:
                         st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
     
+    # --- DASHBOARD ---
     else:
         current_user = st.session_state['user']
         user_role = st.session_state['user_role']
@@ -216,8 +241,10 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
+            # DYNAMIC MENU
             menu_options = ["My Diary", "New Task"]
             menu_icons = ["journal-bookmark", "plus-circle"]
+            
             if is_manager:
                 menu_options.append("Sync Roadmap")
                 menu_icons.append("cloud-arrow-down")
@@ -251,8 +278,10 @@ def main():
             st.write("") 
             if st.button("Logout", use_container_width=True):
                 st.session_state['logged_in'] = False
+                st.session_state['user_role'] = None
                 st.rerun()
 
+        # --- VIEW: SYNC ---
         if nav_mode == "Sync Roadmap" and is_manager:
             st.header("🔗 Google Sheets Sync")
             st.info("Update your Google Sheet 'ROADMAP' tab, then click below.")
@@ -262,6 +291,7 @@ def main():
                     if success: st.success(msg)
                     else: st.error(msg)
 
+        # --- VIEW: TEAM MASTER ---
         elif nav_mode == "Team Master" and is_manager:
             st.title("👥 Team Master")
             with st.expander("➕ Add New User", expanded=True):
@@ -300,6 +330,7 @@ def main():
             else:
                 st.info("No users found.")
 
+        # --- VIEW: NEW TASK ---
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             with st.container(border=True):
@@ -330,6 +361,7 @@ def main():
                     else:
                         st.warning("Description required.")
 
+        # --- VIEW: DIARY ---
         elif nav_mode == "My Diary":
             df = pd.DataFrame()
             if is_manager:
