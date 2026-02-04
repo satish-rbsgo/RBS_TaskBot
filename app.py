@@ -49,10 +49,9 @@ supabase = init_supabase()
 def verify_user_in_db(email):
     """Check user_master table for access"""
     try:
-        # We query the DB instead of checking a hardcoded list
         response = supabase.table("user_master").select("*").eq("email", email).eq("status", "active").execute()
         if response.data:
-            return response.data[0] # Returns user record {'email':..., 'role':...}
+            return response.data[0]
         return None
     except Exception as e:
         return None
@@ -64,6 +63,24 @@ def get_active_users():
         return [u['email'] for u in response.data] if response.data else []
     except:
         return []
+
+def create_new_user(email, name, role):
+    """Add a new user to the master table"""
+    try:
+        data = {"email": email, "name": name, "role": role, "status": "active"}
+        supabase.table("user_master").insert(data).execute()
+        return True, "User added successfully!"
+    except Exception as e:
+        return False, str(e)
+
+def toggle_user_status(email, current_status):
+    """Deactivate or Reactivate a user"""
+    try:
+        new_status = "inactive" if current_status == "active" else "active"
+        supabase.table("user_master").update({"status": new_status}).eq("email", email).execute()
+        return True
+    except:
+        return False
 
 # --- GEMINI AI ---
 def get_ai_summary(task_dataframe):
@@ -135,7 +152,6 @@ def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref
         return False
 
 def get_tasks(target_email=None):
-    # If target_email is None, fetch ALL tasks (Manager View)
     query = supabase.table("tasks").select("*")
     if target_email:
         query = query.eq("assigned_to", target_email)
@@ -167,17 +183,17 @@ def main():
                 if st.button("Login", use_container_width=True):
                     email = email_input.lower().strip()
                     if email.endswith(COMPANY_DOMAIN):
-                        # DB VERIFICATION (The "Master" Check)
+                        # DB VERIFICATION
                         user_record = verify_user_in_db(email)
                         
                         if user_record:
                             st.session_state['logged_in'] = True
                             st.session_state['user'] = user_record['email']
-                            st.session_state['user_role'] = user_record['role'] # 'manager' or 'member'
+                            st.session_state['user_role'] = user_record['role'] 
                             st.session_state['user_name'] = user_record['name']
                             st.rerun()
                         else:
-                            st.error("🚫 Access Denied. Contact Admin (Satish/Sriram) to be added to Master.")
+                            st.error("🚫 Access Denied. Contact Admin (Satish/Sriram).")
                     else:
                         st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
     
@@ -198,9 +214,12 @@ def main():
             # DYNAMIC MENU
             menu_options = ["My Diary", "New Task"]
             menu_icons = ["journal-bookmark", "plus-circle"]
+            
             if is_manager:
                 menu_options.append("Sync Roadmap")
                 menu_icons.append("cloud-arrow-down")
+                menu_options.append("Team Master") # NEW MASTER MENU
+                menu_icons.append("people-fill")
 
             nav_mode = option_menu(
                 menu_title=None, 
@@ -217,11 +236,9 @@ def main():
             )
             
             st.divider()
-            
             st.markdown("**🤖 Assistant**")
             if st.button("Generate Briefing", use_container_width=True):
                 with st.spinner("Analyzing..."):
-                    # Managers analyze ALL, Staff analyze OWN
                     tasks_to_analyze = get_tasks(None) if is_manager else get_tasks(current_user)
                     if not tasks_to_analyze.empty:
                         st.info(get_ai_summary(tasks_to_analyze))
@@ -244,6 +261,45 @@ def main():
                     if success: st.success(msg)
                     else: st.error(msg)
 
+        # --- VIEW: TEAM MASTER (NEW!) ---
+        elif nav_mode == "Team Master" and is_manager:
+            st.title("👥 Team Master")
+            
+            with st.expander("➕ Add New User", expanded=True):
+                with st.form("add_user"):
+                    c1, c2, c3 = st.columns(3)
+                    new_name = c1.text_input("Name")
+                    new_email = c2.text_input("Email (must be @rbsgo.com)")
+                    new_role = c3.selectbox("Role", ["member", "manager"])
+                    
+                    if st.form_submit_button("Add User", type="primary"):
+                        if new_email.endswith("@rbsgo.com") and new_name:
+                            success, msg = create_new_user(new_email.lower().strip(), new_name, new_role)
+                            if success: st.success(msg); st.rerun()
+                            else: st.error(msg)
+                        else:
+                            st.warning("Invalid Email or Name.")
+
+            st.divider()
+            st.subheader("Current Team List")
+            # Fetch and display users
+            users = supabase.table("user_master").select("*").execute().data
+            if users:
+                df_users = pd.DataFrame(users)
+                # Simple Display
+                for i, u in df_users.iterrows():
+                    c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
+                    c1.write(f"**{u['name']}**")
+                    c2.write(f"`{u['email']}`")
+                    c3.write(f"_{u['role']}_")
+                    
+                    btn_label = "🔴 Deactivate" if u['status'] == 'active' else "🟢 Activate"
+                    if c4.button(btn_label, key=f"tog_{u['email']}"):
+                        toggle_user_status(u['email'], u['status'])
+                        st.rerun()
+            else:
+                st.info("No users found.")
+
         # --- VIEW: NEW TASK ---
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
@@ -257,7 +313,6 @@ def main():
 
                 c3, c4, c5 = st.columns(3)
                 with c3:
-                    # DB DRIVEN DROPDOWN
                     if is_manager:
                         all_active_users = get_active_users()
                         assign_to = st.selectbox("Assign To", all_active_users, index=all_active_users.index(current_user) if current_user in all_active_users else 0)
@@ -279,7 +334,6 @@ def main():
         # --- VIEW: DIARY ---
         elif nav_mode == "My Diary":
             
-            # DB DRIVEN FILTER
             df = pd.DataFrame()
             if is_manager:
                 c_filter, c_title = st.columns([1, 3])
@@ -290,20 +344,18 @@ def main():
                     st.title("📔 Operational Diary")
                 
                 if view_target == "All Users":
-                    df = get_tasks(None) # Get All
+                    df = get_tasks(None) 
                 else:
-                    df = get_tasks(view_target) # Get Specific
+                    df = get_tasks(view_target) 
             else:
                 st.title("📔 My Diary")
-                df = get_tasks(current_user) # Only Self
+                df = get_tasks(current_user) 
             
-            # --- RENDER LIST ---
             if not df.empty:
                 df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
 
-                # CALCULATE COUNTS (Fancy Badges)
                 c_all = len(active_df)
                 c_today = len(active_df[active_df['due_date'] == today_ts])
                 c_tmrw = len(active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)])
@@ -339,7 +391,10 @@ def main():
                     filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
                     for index, row in filtered.iterrows():
                         d_str = row['due_date'].strftime('%d-%b')
-                        proj = row['project_ref'] if row['project_ref'] else "General"
+                        
+                        proj = row.get('project_ref', 'General') 
+                        if not proj: proj = "General"
+
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                         
                         assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and 'assigned_to' in row) else ""
