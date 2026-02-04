@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 from langchain_google_genai import ChatGoogleGenerativeAI
 from streamlit_option_menu import option_menu
+import time
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="RBS TaskHub", layout="wide", page_icon="🚀")
@@ -67,7 +68,7 @@ def get_active_users():
 def create_new_user(email, name, role):
     """Add a new user to the master table"""
     try:
-        # Check if exists first to prevent error
+        # Check if exists first
         exists = supabase.table("user_master").select("*").eq("email", email).execute()
         if exists.data:
             return False, "User already exists!"
@@ -111,6 +112,7 @@ def get_ai_summary(task_dataframe):
 # --- DATA FUNCTIONS ---
 def sync_projects():
     try:
+        # Ensure the 'projects' table exists in Supabase before running this!
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(worksheet="ROADMAP") 
         count = 0
@@ -124,10 +126,14 @@ def sync_projects():
             }
             supabase.table("projects").upsert(data, on_conflict="name").execute()
             count += 1
+        # Clear cache so the dropdown updates immediately
+        get_projects.clear()
         return True, f"Synced {count} Projects!"
     except Exception as e:
         return False, f"Sync Error: {str(e)}"
 
+# Added Caching for speed
+@st.cache_data(ttl=60)
 def get_projects():
     try:
         response = supabase.table("projects").select("name").execute()
@@ -266,12 +272,12 @@ def main():
                     if success: st.success(msg)
                     else: st.error(msg)
 
-        # --- VIEW: TEAM MASTER (The Fix Applied Here) ---
+        # --- VIEW: TEAM MASTER ---
         elif nav_mode == "Team Master" and is_manager:
             st.title("👥 Team Master")
             
             with st.expander("➕ Add New User", expanded=True):
-                # FIX: clear_on_submit=True resets inputs after adding!
+                # FIX: clear_on_submit=True will reset the form inputs after adding
                 with st.form("add_user", clear_on_submit=True):
                     c1, c2, c3 = st.columns(3)
                     new_name = c1.text_input("Name")
@@ -283,9 +289,7 @@ def main():
                             success, msg = create_new_user(new_email.lower().strip(), new_name, new_role)
                             if success: 
                                 st.toast(msg, icon="✅")
-                                # We wait briefly to show the toast before rerun
-                                import time
-                                time.sleep(1) 
+                                time.sleep(1)
                                 st.rerun()
                             else: st.error(msg)
                         else:
@@ -297,8 +301,6 @@ def main():
             if users:
                 df_users = pd.DataFrame(users)
                 for i, u in df_users.iterrows():
-                    # Styling nicely
-                    bg_color = "#e6fffa" if u['status'] == 'active' else "#fff5f5"
                     with st.container(border=True):
                         c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
                         c1.write(f"**{u['name']}**")
@@ -320,6 +322,7 @@ def main():
                 with c1:
                     desc = st.text_input("Task Description", placeholder="What needs to be done?")
                 with c2:
+                    # FIX: Projects loaded from DB
                     project_list = get_projects()
                     selected_project = st.selectbox("Project", ["General"] + project_list)
 
