@@ -67,6 +67,11 @@ def get_active_users():
 def create_new_user(email, name, role):
     """Add a new user to the master table"""
     try:
+        # Check if exists first to prevent error
+        exists = supabase.table("user_master").select("*").eq("email", email).execute()
+        if exists.data:
+            return False, "User already exists!"
+            
         data = {"email": email, "name": name, "role": role, "status": "active"}
         supabase.table("user_master").insert(data).execute()
         return True, "User added successfully!"
@@ -218,7 +223,7 @@ def main():
             if is_manager:
                 menu_options.append("Sync Roadmap")
                 menu_icons.append("cloud-arrow-down")
-                menu_options.append("Team Master") # NEW MASTER MENU
+                menu_options.append("Team Master") 
                 menu_icons.append("people-fill")
 
             nav_mode = option_menu(
@@ -261,12 +266,13 @@ def main():
                     if success: st.success(msg)
                     else: st.error(msg)
 
-        # --- VIEW: TEAM MASTER (NEW!) ---
+        # --- VIEW: TEAM MASTER (The Fix Applied Here) ---
         elif nav_mode == "Team Master" and is_manager:
             st.title("👥 Team Master")
             
             with st.expander("➕ Add New User", expanded=True):
-                with st.form("add_user"):
+                # FIX: clear_on_submit=True resets inputs after adding!
+                with st.form("add_user", clear_on_submit=True):
                     c1, c2, c3 = st.columns(3)
                     new_name = c1.text_input("Name")
                     new_email = c2.text_input("Email (must be @rbsgo.com)")
@@ -275,28 +281,34 @@ def main():
                     if st.form_submit_button("Add User", type="primary"):
                         if new_email.endswith("@rbsgo.com") and new_name:
                             success, msg = create_new_user(new_email.lower().strip(), new_name, new_role)
-                            if success: st.success(msg); st.rerun()
+                            if success: 
+                                st.toast(msg, icon="✅")
+                                # We wait briefly to show the toast before rerun
+                                import time
+                                time.sleep(1) 
+                                st.rerun()
                             else: st.error(msg)
                         else:
                             st.warning("Invalid Email or Name.")
 
             st.divider()
             st.subheader("Current Team List")
-            # Fetch and display users
-            users = supabase.table("user_master").select("*").execute().data
+            users = supabase.table("user_master").select("*").order("name").execute().data
             if users:
                 df_users = pd.DataFrame(users)
-                # Simple Display
                 for i, u in df_users.iterrows():
-                    c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
-                    c1.write(f"**{u['name']}**")
-                    c2.write(f"`{u['email']}`")
-                    c3.write(f"_{u['role']}_")
-                    
-                    btn_label = "🔴 Deactivate" if u['status'] == 'active' else "🟢 Activate"
-                    if c4.button(btn_label, key=f"tog_{u['email']}"):
-                        toggle_user_status(u['email'], u['status'])
-                        st.rerun()
+                    # Styling nicely
+                    bg_color = "#e6fffa" if u['status'] == 'active' else "#fff5f5"
+                    with st.container(border=True):
+                        c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
+                        c1.write(f"**{u['name']}**")
+                        c2.write(f"`{u['email']}`")
+                        c3.caption(f"_{u['role']}_")
+                        
+                        btn_label = "🔴 Deactivate" if u['status'] == 'active' else "🟢 Activate"
+                        if c4.button(btn_label, key=f"tog_{u['email']}"):
+                            toggle_user_status(u['email'], u['status'])
+                            st.rerun()
             else:
                 st.info("No users found.")
 
