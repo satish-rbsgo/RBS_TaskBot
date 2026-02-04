@@ -109,30 +109,40 @@ def get_ai_summary(task_dataframe):
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# --- DATA FUNCTIONS ---
+# --- DATA FUNCTIONS (FIXED FOR YOUR SHEET HEADERS) ---
 def sync_projects():
     try:
-        # Ensure the 'projects' table exists in Supabase before running this!
+        # NOTE: Ensure your Sheet Tab name is exactly 'ROADMAP'
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(worksheet="ROADMAP") 
         count = 0
+        
+        # MAPPING BASED ON YOUR SCREENSHOT:
+        # Interface Name -> name
+        # Status -> status
+        # Particulars -> description
+        # Vendor -> vendor
+        
         for index, row in df.iterrows():
+            # Skip empty rows
+            if pd.isna(row['Interface Name']) or row['Interface Name'] == '':
+                continue
+                
             data = {
                 "name": row['Interface Name'],
-                "status": row['Stage'],
-                "target_date": str(row['Target Date']),
-                "description": row['Description'],
-                "client": row['Client']
+                "status": row['Status'],
+                "description": row.get('Particulars', ''), # Use .get() to handle missing columns safely
+                "vendor": row.get('Vendor', '')
             }
             supabase.table("projects").upsert(data, on_conflict="name").execute()
             count += 1
+            
         # Clear cache so the dropdown updates immediately
         get_projects.clear()
         return True, f"Synced {count} Projects!"
     except Exception as e:
         return False, f"Sync Error: {str(e)}"
 
-# Added Caching for speed
 @st.cache_data(ttl=60)
 def get_projects():
     try:
@@ -277,7 +287,7 @@ def main():
             st.title("👥 Team Master")
             
             with st.expander("➕ Add New User", expanded=True):
-                # FIX: clear_on_submit=True will reset the form inputs after adding
+                # FIX: clear_on_submit=True resets inputs after adding
                 with st.form("add_user", clear_on_submit=True):
                     c1, c2, c3 = st.columns(3)
                     new_name = c1.text_input("Name")
