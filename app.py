@@ -111,28 +111,30 @@ def get_ai_summary(task_dataframe):
 def sync_projects():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        df = conn.read(worksheet="ROADMAP") 
+        # ttl=0 forces fresh data (No Cache)
+        df = conn.read(worksheet="ROADMAP", ttl=0) 
         count = 0
         
         # 1. Validation: Check if sheet is empty
         if df.empty:
             return False, "⚠️ Google Sheet is empty or tab 'ROADMAP' not found."
 
-        # 2. Iterate
+        # 2. CRITICAL: Global Cleanup (Convert all NaN/Float/Null to empty strings)
+        # This prevents the HTTP 400 Bad Request Error
+        df = df.fillna("")
+        df = df.astype(str)
+
+        # 3. Iterate
         for index, row in df.iterrows():
             # Check for empty Interface Name
-            if pd.isna(row.get('Interface Name')) or str(row.get('Interface Name')).strip() == '':
+            if row.get('Interface Name', '').strip() == '':
                 continue
             
-            # 3. CRITICAL: Clean Data (Convert NaN to empty strings to prevent HTTP 400)
-            def clean_val(val):
-                if pd.isna(val): return ""
-                return str(val).strip()
-
-            p_name = clean_val(row.get('Interface Name'))
-            p_status = clean_val(row.get('Status'))
-            p_desc = clean_val(row.get('Particulars')) # Maps 'Particulars' -> 'description'
-            p_vendor = clean_val(row.get('Vendor'))    # Maps 'Vendor' -> 'vendor'
+            # Safe Data Extraction (Strip spaces)
+            p_name = row.get('Interface Name', '').strip()
+            p_status = row.get('Status', '').strip()
+            p_desc = row.get('Particulars', '').strip() # Maps 'Particulars' -> 'description'
+            p_vendor = row.get('Vendor', '').strip()    # Maps 'Vendor' -> 'vendor'
 
             data = {
                 "name": p_name,
@@ -141,12 +143,12 @@ def sync_projects():
                 "vendor": p_vendor
             }
             
-            # 4. Safe Upsert
+            # 4. Upsert to Supabase
             try:
                 supabase.table("projects").upsert(data, on_conflict="name").execute()
                 count += 1
             except Exception as row_error:
-                # If a specific row fails, log it but continue syncing others
+                # If a specific row fails, log it but don't stop the whole sync
                 print(f"Skipped row {p_name}: {row_error}")
                 continue
             
@@ -323,6 +325,7 @@ def main():
                         c1.write(f"**{u['name']}**")
                         c2.write(f"`{u['email']}`")
                         c3.caption(f"_{u['role']}_")
+                        
                         btn_label = "🔴 Deactivate" if u['status'] == 'active' else "🟢 Activate"
                         if c4.button(btn_label, key=f"tog_{u['email']}"):
                             toggle_user_status(u['email'], u['status'])
