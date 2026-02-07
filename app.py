@@ -46,95 +46,73 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- AUTHENTICATION & MASTERS (DB DRIVEN) ---
+# --- AUTHENTICATION & MASTERS ---
 def verify_user_in_db(email):
-    """Check user_master table for access"""
     try:
         response = supabase.table("user_master").select("*").eq("email", email).eq("status", "active").execute()
-        if response.data:
-            return response.data[0]
+        if response.data: return response.data[0]
         return None
-    except Exception as e:
-        return None
+    except: return None
 
 def get_active_users():
-    """Fetch all active users for dropdowns (Managers only)"""
     try:
         response = supabase.table("user_master").select("email").eq("status", "active").execute()
         return [u['email'] for u in response.data] if response.data else []
-    except:
-        return []
+    except: return []
 
 def create_new_user(email, name, role):
-    """Add a new user to the master table"""
     try:
         exists = supabase.table("user_master").select("*").eq("email", email).execute()
         if exists.data: return False, "User already exists!"
-        
         data = {"email": email, "name": name, "role": role, "status": "active"}
         supabase.table("user_master").insert(data).execute()
         return True, "User added successfully!"
-    except Exception as e:
-        return False, str(e)
+    except Exception as e: return False, str(e)
 
 def toggle_user_status(email, current_status):
-    """Deactivate or Reactivate a user"""
     try:
         new_status = "inactive" if current_status == "active" else "active"
         supabase.table("user_master").update({"status": new_status}).eq("email", email).execute()
         return True
-    except:
-        return False
+    except: return False
 
 # --- GEMINI AI ---
 def get_ai_summary(task_dataframe):
     try:
         if "GOOGLE_API_KEY" in st.secrets:
             api_key = st.secrets["GOOGLE_API_KEY"]
-        else:
-            return "⚠️ Google API Key missing."
+        else: return "⚠️ Google API Key missing."
         llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=api_key)
         task_text = task_dataframe.to_string(index=False)
-        prompt = f"""
-        Act as a Project Manager. Summarize this task list in 3 bullet points:
-        1. Critical Bottlenecks (Overdue/High Priority)
-        2. Today's Focus
-        3. Motivational one-liner.
-        Tasks: {task_text}
-        """
+        prompt = f"Act as Project Manager. Summarize:\n1. Critical Bottlenecks\n2. Focus\n3. Motivation\nTasks: {task_text}"
         response = llm.invoke(prompt)
         return response.content
-    except Exception as e:
-        return f"AI Error: {str(e)}"
+    except Exception as e: return f"AI Error: {str(e)}"
 
 # --- DATA FUNCTIONS (CRASH PROOF SYNC) ---
 def sync_projects():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        # ttl=0 forces fresh data (No Cache)
         df = conn.read(worksheet="ROADMAP", ttl=0) 
-        count = 0
         
-        # 1. Validation: Check if sheet is empty
-        if df.empty:
-            return False, "⚠️ Google Sheet is empty or tab 'ROADMAP' not found."
+        if df.empty: return False, "⚠️ Sheet is empty or missing 'ROADMAP' tab."
 
-        # 2. CRITICAL: Global Cleanup (Convert all NaN/Float/Null to empty strings)
-        # This prevents the HTTP 400 Bad Request Error
-        df = df.fillna("")
-        df = df.astype(str)
+        # 1. Clean Column Headers (Remove hidden spaces like "Vendor ")
+        df.columns = df.columns.str.strip()
 
-        # 3. Iterate
+        # 2. Clean Data (Force all to string, replace NaN with empty string)
+        df = df.fillna("").astype(str)
+        
+        count = 0
         for index, row in df.iterrows():
-            # Check for empty Interface Name
-            if row.get('Interface Name', '').strip() == '':
-                continue
+            # Validate Name
+            if row.get('Interface Name', '').strip() == '': continue
             
-            # Safe Data Extraction (Strip spaces)
+            # Extract safely with stripped keys
             p_name = row.get('Interface Name', '').strip()
             p_status = row.get('Status', '').strip()
-            p_desc = row.get('Particulars', '').strip() # Maps 'Particulars' -> 'description'
-            p_vendor = row.get('Vendor', '').strip()    # Maps 'Vendor' -> 'vendor'
+            p_desc = row.get('Particulars', '').strip()
+            p_vendor = row.get('Vendor', '').strip()
 
             data = {
                 "name": p_name,
@@ -142,65 +120,69 @@ def sync_projects():
                 "description": p_desc,
                 "vendor": p_vendor
             }
-            
-            # 4. Upsert to Supabase
             try:
+                # Upsert into DB
                 supabase.table("projects").upsert(data, on_conflict="name").execute()
                 count += 1
             except Exception as row_error:
-                # If a specific row fails, log it but don't stop the whole sync
-                print(f"Skipped row {p_name}: {row_error}")
+                print(f"Skipped {p_name}: {row_error}")
                 continue
             
-        get_projects.clear() # Clear cache
-        return True, f"✅ Successfully Synced {count} Projects!"
+        get_projects.clear()
+        return True, f"✅ Synced {count} Projects!"
         
     except Exception as e:
-        return False, f"❌ Sync Failed. Detail: {str(e)}"
+        return False, f"❌ Sync Error: {str(e)}"
 
 @st.cache_data(ttl=60)
 def get_projects():
     try:
         response = supabase.table("projects").select("name").execute()
         return [row['name'] for row in response.data] if response.data else []
-    except:
-        return []
+    except: return []
 
+# --- TASK FUNCTIONS ---
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref):
     try:
         final_date = str(due_date) if due_date else str(date.today())
         final_project = project_ref if project_ref else "General"
         data = {
-            "created_by": created_by,
-            "assigned_to": assigned_to,
-            "task_desc": task_desc,
-            "status": "Open",
-            "priority": priority,
-            "due_date": final_date,
-            "project_ref": final_project,
-            "staff_remarks": "",
-            "manager_remarks": ""
+            "created_by": created_by, "assigned_to": assigned_to, "task_desc": task_desc,
+            "status": "Open", "priority": priority, "due_date": final_date,
+            "project_ref": final_project, "staff_remarks": "", "manager_remarks": ""
         }
         supabase.table("tasks").insert(data).execute()
         return True
-    except Exception as e:
-        st.error(f"Error: {e}")
-        return False
+    except: return False
 
 def get_tasks(target_email=None):
     query = supabase.table("tasks").select("*")
-    if target_email:
-        query = query.eq("assigned_to", target_email)
+    if target_email: query = query.eq("assigned_to", target_email)
     response = query.execute()
     return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
+# Standard Status Update
 def update_task_status(task_id, new_status, remarks=None):
     try:
         data = {"status": new_status}
         if remarks: data["staff_remarks"] = remarks
         supabase.table("tasks").update(data).eq("id", task_id).execute()
         return True
-    except:
+    except: return False
+
+# FULL EDIT: Update all fields of a task
+def update_task_full(task_id, desc, due_date, priority, remarks):
+    try:
+        data = {
+            "task_desc": desc,
+            "due_date": str(due_date),
+            "priority": priority,
+            "staff_remarks": remarks
+        }
+        supabase.table("tasks").update(data).eq("id", task_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"Update failed: {e}")
         return False
 
 # --- MAIN APP ---
@@ -209,7 +191,6 @@ def main():
     if 'user_role' not in st.session_state: st.session_state['user_role'] = None
     if 'user_name' not in st.session_state: st.session_state['user_name'] = None
 
-    # --- LOGIN SCREEN ---
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -226,12 +207,9 @@ def main():
                             st.session_state['user_role'] = user_record['role'] 
                             st.session_state['user_name'] = user_record['name']
                             st.rerun()
-                        else:
-                            st.error("🚫 Access Denied. Contact Admin (Satish/Sriram).")
-                    else:
-                        st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
+                        else: st.error("🚫 Access Denied.")
+                    else: st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
     
-    # --- DASHBOARD ---
     else:
         current_user = st.session_state['user']
         user_role = st.session_state['user_role']
@@ -243,10 +221,8 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # DYNAMIC MENU
             menu_options = ["My Diary", "New Task"]
             menu_icons = ["journal-bookmark", "plus-circle"]
-            
             if is_manager:
                 menu_options.append("Sync Roadmap")
                 menu_icons.append("cloud-arrow-down")
@@ -254,17 +230,12 @@ def main():
                 menu_icons.append("people-fill")
 
             nav_mode = option_menu(
-                menu_title=None, 
-                options=menu_options, 
-                icons=menu_icons, 
-                menu_icon="cast", 
-                default_index=0,
-                styles={
-                    "container": {"padding": "0!important", "background-color": "#fafafa"},
-                    "icon": {"color": "black", "font-size": "16px"}, 
-                    "nav-link": {"font-size": "14px", "text-align": "left", "margin":"0px"},
-                    "nav-link-selected": {"background-color": "#ff4b4b"},
-                }
+                menu_title=None, options=menu_options, icons=menu_icons, 
+                menu_icon="cast", default_index=0,
+                styles={"container": {"padding": "0!important", "background-color": "#fafafa"},
+                        "icon": {"color": "black", "font-size": "16px"}, 
+                        "nav-link": {"font-size": "14px", "text-align": "left", "margin":"0px"},
+                        "nav-link-selected": {"background-color": "#ff4b4b"}}
             )
             
             st.divider()
@@ -272,18 +243,13 @@ def main():
             if st.button("Generate Briefing", use_container_width=True):
                 with st.spinner("Analyzing..."):
                     tasks_to_analyze = get_tasks(None) if is_manager else get_tasks(current_user)
-                    if not tasks_to_analyze.empty:
-                        st.info(get_ai_summary(tasks_to_analyze))
-                    else:
-                        st.warning("No data.")
+                    if not tasks_to_analyze.empty: st.info(get_ai_summary(tasks_to_analyze))
+                    else: st.warning("No data.")
             
             st.write("") 
             if st.button("Logout", use_container_width=True):
-                st.session_state['logged_in'] = False
-                st.session_state['user_role'] = None
-                st.rerun()
+                st.session_state['logged_in'] = False; st.rerun()
 
-        # --- VIEW: SYNC ---
         if nav_mode == "Sync Roadmap" and is_manager:
             st.header("🔗 Google Sheets Sync")
             st.info("Update your Google Sheet 'ROADMAP' tab, then click below.")
@@ -293,7 +259,6 @@ def main():
                     if success: st.success(msg)
                     else: st.error(msg)
 
-        # --- VIEW: TEAM MASTER ---
         elif nav_mode == "Team Master" and is_manager:
             st.title("👥 Team Master")
             with st.expander("➕ Add New User", expanded=True):
@@ -302,17 +267,12 @@ def main():
                     new_name = c1.text_input("Name")
                     new_email = c2.text_input("Email (must be @rbsgo.com)")
                     new_role = c3.selectbox("Role", ["member", "manager"])
-                    
                     if st.form_submit_button("Add User", type="primary"):
                         if new_email.endswith("@rbsgo.com") and new_name:
                             success, msg = create_new_user(new_email.lower().strip(), new_name, new_role)
-                            if success: 
-                                st.toast(msg, icon="✅")
-                                time.sleep(1)
-                                st.rerun()
+                            if success: st.toast(msg, icon="✅"); time.sleep(1); st.rerun()
                             else: st.error(msg)
-                        else:
-                            st.warning("Invalid Email or Name.")
+                        else: st.warning("Invalid Email or Name.")
 
             st.divider()
             st.subheader("Current Team List")
@@ -322,127 +282,117 @@ def main():
                 for i, u in df_users.iterrows():
                     with st.container(border=True):
                         c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
-                        c1.write(f"**{u['name']}**")
-                        c2.write(f"`{u['email']}`")
-                        c3.caption(f"_{u['role']}_")
-                        
+                        c1.write(f"**{u['name']}**"); c2.write(f"`{u['email']}`"); c3.caption(f"_{u['role']}_")
                         btn_label = "🔴 Deactivate" if u['status'] == 'active' else "🟢 Activate"
                         if c4.button(btn_label, key=f"tog_{u['email']}"):
-                            toggle_user_status(u['email'], u['status'])
-                            st.rerun()
-            else:
-                st.info("No users found.")
+                            toggle_user_status(u['email'], u['status']); st.rerun()
+            else: st.info("No users found.")
 
-        # --- VIEW: NEW TASK ---
+        # --- UPDATED: NEW TASK (Smart Default User) ---
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             with st.container(border=True):
                 c1, c2 = st.columns([2, 1])
-                with c1:
-                    desc = st.text_input("Task Description", placeholder="What needs to be done?")
+                with c1: desc = st.text_input("Task Description", placeholder="What needs to be done?")
                 with c2:
                     project_list = get_projects()
                     selected_project = st.selectbox("Project", ["General"] + project_list)
-
                 c3, c4, c5 = st.columns(3)
                 with c3:
                     if is_manager:
-                        all_active_users = get_active_users()
-                        assign_to = st.selectbox("Assign To", all_active_users, index=all_active_users.index(current_user) if current_user in all_active_users else 0)
-                    else:
-                        assign_to = st.selectbox("Assign To", [current_user], disabled=True)
-                
-                with c4:
-                    prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
-                with c5:
-                    due = st.date_input("Due Date", value=date.today())
-                
+                        all_users = get_active_users()
+                        # LOGIC: Find index of current user to set as default
+                        default_idx = 0
+                        if current_user in all_users:
+                            default_idx = all_users.index(current_user)
+                        assign_to = st.selectbox("Assign To", all_users, index=default_idx)
+                    else: assign_to = st.selectbox("Assign To", [current_user], disabled=True)
+                with c4: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
+                with c5: due = st.date_input("Due Date", value=date.today())
                 if st.button("Add Task", type="primary", use_container_width=True):
                     if desc:
                         if add_task(current_user, assign_to, desc, prio, due, selected_project):
                             st.toast(f"✅ Task assigned to {assign_to}!")
-                    else:
-                        st.warning("Description required.")
+                    else: st.warning("Description required.")
 
-        # --- VIEW: DIARY ---
+        # --- UPDATED: MY DIARY (Full Edit Mode) ---
         elif nav_mode == "My Diary":
             df = pd.DataFrame()
             if is_manager:
                 c_filter, c_title = st.columns([1, 3])
                 with c_filter:
-                    all_active_users = get_active_users()
-                    view_target = st.selectbox("View Diary For:", ["All Users"] + all_active_users)
-                with c_title:
-                    st.title("📔 Operational Diary")
-                
-                if view_target == "All Users":
-                    df = get_tasks(None) 
-                else:
-                    df = get_tasks(view_target) 
+                    all_users = get_active_users()
+                    view_target = st.selectbox("View Diary For:", ["All Users"] + all_users)
+                with c_title: st.title("📔 Operational Diary")
+                df = get_tasks(None) if view_target == "All Users" else get_tasks(view_target)
             else:
                 st.title("📔 My Diary")
-                df = get_tasks(current_user) 
+                df = get_tasks(current_user)
             
             if not df.empty:
                 df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
-
+                
                 c_all = len(active_df)
                 c_today = len(active_df[active_df['due_date'] == today_ts])
                 c_tmrw = len(active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)])
                 c_over = len(active_df[active_df['due_date'] < today_ts])
-
-                opt_all = f"All Pending ({c_all})"
-                opt_today = f"Today ({c_today})"
-                opt_tmrw = f"Tomorrow ({c_tmrw})"
-                opt_over = f"Overdue ({c_over})"
-
+                
                 selected_filter = option_menu(
                     menu_title=None,
-                    options=[opt_all, opt_today, opt_tmrw, opt_over],
+                    options=[f"All Pending ({c_all})", f"Today ({c_today})", f"Tomorrow ({c_tmrw})", f"Overdue ({c_over})"],
                     icons=["folder", "lightning", "calendar", "exclamation-triangle"],
                     orientation="horizontal",
                     styles={"container": {"padding": "0!important", "background-color": "#fafafa"}}
                 )
-
-                if selected_filter == opt_today: 
-                    filtered = active_df[active_df['due_date'] == today_ts]
-                elif selected_filter == opt_tmrw: 
-                    filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
-                elif selected_filter == opt_over: 
-                    filtered = active_df[active_df['due_date'] < today_ts]
-                else: 
-                    filtered = active_df
                 
-                st.write("") 
-
-                if filtered.empty:
-                    st.info(f"✅ No tasks found for '{selected_filter}'.")
+                if "Today" in selected_filter: filtered = active_df[active_df['due_date'] == today_ts]
+                elif "Tomorrow" in selected_filter: filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
+                elif "Overdue" in selected_filter: filtered = active_df[active_df['due_date'] < today_ts]
+                else: filtered = active_df
+                
+                st.write("")
+                if filtered.empty: st.info(f"✅ No tasks found for '{selected_filter}'.")
                 else:
                     filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
                     for index, row in filtered.iterrows():
                         d_str = row['due_date'].strftime('%d-%b')
-                        proj = row.get('project_ref', 'General') 
+                        proj = row.get('project_ref', 'General')
                         if not proj: proj = "General"
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                         assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and 'assigned_to' in row) else ""
-
+                        
+                        # --- FULL EDIT UI ---
                         with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
-                            c1, c2 = st.columns([3, 1])
-                            with c1:
-                                st.caption(f"Created by: {row['created_by']}")
-                                if row['staff_remarks']: st.info(f"Remark: {row['staff_remarks']}")
-                                new_rem = st.text_input("Update", key=f"r_{row['id']}_{selected_filter}")
-                            with c2:
-                                st.write("")
-                                st.write("") 
-                                if st.button("Mark Done", key=f"d_{row['id']}_{selected_filter}", type="primary"):
-                                    remark_to_save = new_rem if new_rem else row['staff_remarks']
-                                    update_task_status(row['id'], "Completed", remark_to_save)
+                            
+                            with st.form(key=f"edit_form_{row['id']}"):
+                                c_edit_1, c_edit_2 = st.columns([2, 1])
+                                new_desc = c_edit_1.text_input("Description", value=row['task_desc'])
+                                new_rem = c_edit_2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
+                                
+                                c_edit_3, c_edit_4 = st.columns([1, 1])
+                                new_date = c_edit_3.date_input("Due Date", value=row['due_date'])
+                                # Safely handle priority default
+                                prio_options = ["🔥 High", "⚡ Medium", "🧊 Low"]
+                                default_prio_idx = prio_options.index(row['priority']) if row['priority'] in prio_options else 1
+                                new_prio = c_edit_4.selectbox("Priority", prio_options, index=default_prio_idx)
+
+                                c_btn_a, c_btn_b = st.columns(2)
+                                
+                                # SAVE BUTTON
+                                if c_btn_a.form_submit_button("💾 Save Changes"):
+                                    if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem):
+                                        st.toast("✅ Task Updated Successfully!")
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                
+                                # COMPLETE BUTTON
+                                if c_btn_b.form_submit_button("✅ Mark Completed"):
+                                    update_task_status(row['id'], "Completed", new_rem)
                                     st.rerun()
-            else:
-                st.info("👋 No active tasks found.")
+
+            else: st.info("👋 No active tasks found.")
 
 if __name__ == "__main__":
     main()
