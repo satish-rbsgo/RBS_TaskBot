@@ -131,16 +131,15 @@ def get_projects():
         return [row['name'] for row in response.data] if response.data else []
     except: return []
 
-# --- HELPER: GET UNIQUE COORDINATORS ---
-def get_unique_coordinators():
+# --- HELPER: GET UNIQUE VALUES ---
+def get_unique_column_values(column_name):
+    """Fetches unique values for any column (e.g., coordinator, project_ref)"""
     try:
-        # Fetch distinct coordinator values from tasks table
-        response = supabase.table("tasks").select("coordinator").execute()
+        response = supabase.table("tasks").select(column_name).execute()
         if response.data:
-            # Extract list, remove None/Empty, get unique
-            coords = list(set([row['coordinator'] for row in response.data if row['coordinator']]))
-            coords.sort()
-            return coords
+            vals = list(set([row[column_name] for row in response.data if row[column_name]]))
+            vals.sort()
+            return vals
         return []
     except: return []
 
@@ -148,7 +147,6 @@ def get_unique_coordinators():
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref, coordinator, email_subject, points):
     try:
         final_date = str(due_date) if due_date else str(date.today())
-        # Allow project_ref to be None/Empty if user chose not to select
         final_project = project_ref if project_ref else "General"
         
         data = {
@@ -185,8 +183,8 @@ def update_task_status(task_id, new_status, remarks=None):
         return True
     except: return False
 
-# Updated full edit function
-def update_task_full(task_id, new_desc, new_date, new_prio, new_remarks, new_assign, new_points, new_subject, is_manager):
+# Updated full edit function (Now includes Coordinator and Project)
+def update_task_full(task_id, new_desc, new_date, new_prio, new_remarks, new_assign, new_points, new_subject, new_coord, new_proj, is_manager):
     try:
         data = {
             "task_desc": new_desc,
@@ -194,7 +192,9 @@ def update_task_full(task_id, new_desc, new_date, new_prio, new_remarks, new_ass
             "priority": new_prio,
             "staff_remarks": new_remarks,
             "points": new_points,
-            "email_subject": new_subject
+            "email_subject": new_subject,
+            "coordinator": new_coord,
+            "project_ref": new_proj
         }
         if is_manager and new_assign:
             data["assigned_to"] = new_assign
@@ -314,40 +314,38 @@ def main():
                 c1, c2 = st.columns([2, 1])
                 with c1: desc = st.text_input("Task Description", placeholder="What needs to be done?")
                 with c2:
-                    # Logic: Allow selecting existing project OR typing new one (conceptually)
-                    # For now, we keep selectbox but add "General" as default.
-                    project_list = get_projects()
-                    # User requested 'optional' / 'selectable'. 
-                    # Providing a selectbox that defaults to 'General'.
-                    # If they want to type a NEW project, st.selectbox doesn't support direct typing easily without complex logic.
-                    # Standard practice: Selectbox with options.
-                    proj_options = ["General"] + project_list
-                    selected_project = st.selectbox("Project (Select or General)", proj_options)
+                    # 1. FETCH PREVIOUS PROJECTS
+                    # Get projects from Sheet sync OR previously used in tasks
+                    synced_projects = get_projects() # From 'projects' table
+                    used_projects = get_unique_column_values("project_ref") # From 'tasks' table usage
+                    all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
+                    
+                    proj_sel = st.selectbox("Project", ["Select..."] + all_projects + ["➕ Type New..."])
+                    if proj_sel == "➕ Type New...":
+                        selected_project = st.text_input("Enter New Project Name")
+                    elif proj_sel == "Select...":
+                        selected_project = "General"
+                    else:
+                        selected_project = proj_sel
                 
-                # New Row for Coordinator and Subject (Auto-fill logic)
                 c_new_1, c_new_2 = st.columns(2)
                 with c_new_1:
-                    # Fetch existing coordinators to populate list
-                    existing_coords = get_unique_coordinators()
-                    # Add standard defaults
+                    # 2. FETCH PREVIOUS COORDINATORS
+                    existing_coords = get_unique_column_values("coordinator")
                     base_coords = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
-                    # Merge and unique
                     all_coords = sorted(list(set(base_coords + existing_coords)))
                     
-                    # User wants to be able to SELECT or TYPE. Streamlit selectbox doesn't allow typing new unless we use a workaround.
-                    # Workaround: "Other (Type New)" option.
-                    coord_selection = st.selectbox("Point Coordinator", ["Select..."] + all_coords + ["Other (Type New)"])
-                    
-                    final_coordinator = ""
-                    if coord_selection == "Other (Type New)":
+                    coord_sel = st.selectbox("Point Coordinator", ["Select..."] + all_coords + ["➕ Type New..."])
+                    if coord_sel == "➕ Type New...":
                         final_coordinator = st.text_input("Enter New Coordinator Name")
-                    elif coord_selection != "Select...":
-                        final_coordinator = coord_selection
+                    elif coord_sel == "Select...":
+                        final_coordinator = "General"
+                    else:
+                        final_coordinator = coord_sel
                         
                 with c_new_2:
                     email_subj = st.text_input("Email Subject (for tracking)", placeholder="Optional: Paste email subject here")
 
-                # Detailed Points
                 points = st.text_area("Detailed Points / Checklist (One per line)", height=100)
 
                 c3, c4, c5 = st.columns(3)
@@ -366,9 +364,10 @@ def main():
                 
                 if st.button("Add Task", type="primary", use_container_width=True):
                     if desc:
-                        # Use final_coordinator determined above
                         coord_to_save = final_coordinator if final_coordinator else "General"
-                        if add_task(current_user, final_assign, desc, prio, due, selected_project, coord_to_save, email_subj, points):
+                        proj_to_save = selected_project if selected_project else "General"
+                        
+                        if add_task(current_user, final_assign, desc, prio, due, proj_to_save, coord_to_save, email_subj, points):
                             st.toast(f"✅ Task created!")
                             time.sleep(1)
                             st.rerun()
@@ -423,47 +422,59 @@ def main():
                         assign_display = row['assigned_to'] if row['assigned_to'] else "Unassigned"
                         assign_label = f" ➝ {assign_display.split('@')[0].title()}" if (is_manager) else ""
                         
+                        # --- FULL EDIT UI ---
                         with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
                             
                             with st.form(key=f"edit_form_{row['id']}"):
-                                c_edit_1, c_edit_2 = st.columns([2, 1])
-                                new_desc = c_edit_1.text_input("Description", value=row['task_desc'])
+                                # Row 1: Desc & Remarks
+                                c1, c2 = st.columns([2, 1])
+                                new_desc = c1.text_input("Description", value=row['task_desc'])
+                                new_rem = c2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
                                 
+                                # Row 2: Details (Points, Subject, Coordinator) - NEW FIELDS ADDED HERE
+                                c3, c4 = st.columns(2)
                                 curr_points = row.get('points', '') if pd.notna(row.get('points')) else ""
+                                new_points = c3.text_area("Detailed Points", value=curr_points, height=100)
+                                
+                                curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else ""
+                                new_coord = c4.text_input("Point Coordinator", value=curr_coord)
+                                
+                                # Row 3: Meta (Project, Email Subject)
+                                c5, c6 = st.columns(2)
+                                curr_proj = row.get('project_ref', 'General')
+                                new_proj = c5.text_input("Project", value=curr_proj)
+                                
                                 curr_subj = row.get('email_subject', '') if pd.notna(row.get('email_subject')) else ""
-                                
-                                new_points = c_edit_1.text_area("Detailed Points / Checklist", value=curr_points, height=100)
-                                new_subject = c_edit_1.text_input("Email Subject", value=curr_subj)
+                                new_subject = c6.text_input("Email Subject", value=curr_subj)
 
-                                new_rem = c_edit_2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
+                                # Row 4: Status/Assign
+                                c7, c8, c9 = st.columns(3)
+                                new_date = c7.date_input("Due Date", value=row['due_date'])
                                 
-                                c_edit_3, c_edit_4, c_edit_5 = st.columns(3)
-                                new_date = c_edit_3.date_input("Due Date", value=row['due_date'])
                                 prio_options = ["🔥 High", "⚡ Medium", "🧊 Low"]
                                 default_prio_idx = prio_options.index(row['priority']) if row['priority'] in prio_options else 1
-                                new_prio = c_edit_4.selectbox("Priority", prio_options, index=default_prio_idx)
+                                new_prio = c8.selectbox("Priority", prio_options, index=default_prio_idx)
                                 
                                 new_assign = None
                                 if is_manager:
                                     all_users = get_active_users()
                                     curr_assign = row['assigned_to'] if row['assigned_to'] else "Unassigned"
-                                    # Logic to set index safely
                                     assign_opts = ["Unassigned"] + all_users
                                     def_idx = assign_opts.index(curr_assign) if curr_assign in assign_opts else 0
-                                    new_assign_sel = c_edit_5.selectbox("Reassign To", assign_opts, index=def_idx)
+                                    new_assign_sel = c9.selectbox("Reassign To", assign_opts, index=def_idx)
                                     new_assign = new_assign_sel if new_assign_sel != "Unassigned" else None
                                 else:
-                                    c_edit_5.text_input("Assigned To", value=row['assigned_to'], disabled=True)
+                                    c9.text_input("Assigned To", value=row['assigned_to'], disabled=True)
 
-                                c_btn_a, c_btn_b = st.columns(2)
-                                
-                                if c_btn_a.form_submit_button("💾 Save Changes"):
-                                    if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, is_manager):
+                                # Buttons
+                                b1, b2 = st.columns(2)
+                                if b1.form_submit_button("💾 Save Changes"):
+                                    if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, new_coord, new_proj, is_manager):
                                         st.toast("✅ Task Updated Successfully!")
                                         time.sleep(0.5)
                                         st.rerun()
                                 
-                                if c_btn_b.form_submit_button("✅ Mark Completed"):
+                                if b2.form_submit_button("✅ Mark Completed"):
                                     update_task_status(row['id'], "Completed", new_rem)
                                     st.rerun()
 
