@@ -447,6 +447,7 @@ def main():
                                 if is_manager:
                                     all_users = get_active_users()
                                     curr_assign = row['assigned_to'] if row['assigned_to'] else "Unassigned"
+                                    # Logic to set index safely
                                     assign_opts = ["Unassigned"] + all_users
                                     def_idx = assign_opts.index(curr_assign) if curr_assign in assign_opts else 0
                                     new_assign_sel = c_edit_5.selectbox("Reassign To", assign_opts, index=def_idx)
