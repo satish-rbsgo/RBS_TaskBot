@@ -131,15 +131,25 @@ def get_projects():
         return [row['name'] for row in response.data] if response.data else []
     except: return []
 
+# --- HELPER: GET UNIQUE COORDINATORS ---
+def get_unique_coordinators():
+    try:
+        # Fetch distinct coordinator values from tasks table
+        response = supabase.table("tasks").select("coordinator").execute()
+        if response.data:
+            # Extract list, remove None/Empty, get unique
+            coords = list(set([row['coordinator'] for row in response.data if row['coordinator']]))
+            coords.sort()
+            return coords
+        return []
+    except: return []
+
 # --- TASK FUNCTIONS ---
-# Updated to include new fields: coordinator, email_subject, points
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref, coordinator, email_subject, points):
     try:
         final_date = str(due_date) if due_date else str(date.today())
+        # Allow project_ref to be None/Empty if user chose not to select
         final_project = project_ref if project_ref else "General"
-        # If assigned_to is "None" (optional), send None to DB if column allows null, 
-        # but usually it's better to assign to creator or keep as is. 
-        # Assuming table allows null or we send empty string if logic requires.
         
         data = {
             "created_by": created_by, 
@@ -186,7 +196,6 @@ def update_task_full(task_id, new_desc, new_date, new_prio, new_remarks, new_ass
             "points": new_points,
             "email_subject": new_subject
         }
-        # Only manager can update assigned_to
         if is_manager and new_assign:
             data["assigned_to"] = new_assign
             
@@ -305,13 +314,36 @@ def main():
                 c1, c2 = st.columns([2, 1])
                 with c1: desc = st.text_input("Task Description", placeholder="What needs to be done?")
                 with c2:
+                    # Logic: Allow selecting existing project OR typing new one (conceptually)
+                    # For now, we keep selectbox but add "General" as default.
                     project_list = get_projects()
-                    selected_project = st.selectbox("Project", ["General"] + project_list)
+                    # User requested 'optional' / 'selectable'. 
+                    # Providing a selectbox that defaults to 'General'.
+                    # If they want to type a NEW project, st.selectbox doesn't support direct typing easily without complex logic.
+                    # Standard practice: Selectbox with options.
+                    proj_options = ["General"] + project_list
+                    selected_project = st.selectbox("Project (Select or General)", proj_options)
                 
-                # New Row for Coordinator and Subject
+                # New Row for Coordinator and Subject (Auto-fill logic)
                 c_new_1, c_new_2 = st.columns(2)
                 with c_new_1:
-                    coordinator = st.selectbox("Point Coordinator (Source)", ["Sales Team", "Client", "Support Team", "Internal", "Management"])
+                    # Fetch existing coordinators to populate list
+                    existing_coords = get_unique_coordinators()
+                    # Add standard defaults
+                    base_coords = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
+                    # Merge and unique
+                    all_coords = sorted(list(set(base_coords + existing_coords)))
+                    
+                    # User wants to be able to SELECT or TYPE. Streamlit selectbox doesn't allow typing new unless we use a workaround.
+                    # Workaround: "Other (Type New)" option.
+                    coord_selection = st.selectbox("Point Coordinator", ["Select..."] + all_coords + ["Other (Type New)"])
+                    
+                    final_coordinator = ""
+                    if coord_selection == "Other (Type New)":
+                        final_coordinator = st.text_input("Enter New Coordinator Name")
+                    elif coord_selection != "Select...":
+                        final_coordinator = coord_selection
+                        
                 with c_new_2:
                     email_subj = st.text_input("Email Subject (for tracking)", placeholder="Optional: Paste email subject here")
 
@@ -321,16 +353,12 @@ def main():
                 c3, c4, c5 = st.columns(3)
                 with c3:
                     all_users = get_active_users()
-                    # Optional Assignment Logic
                     assign_options = ["Unassigned"] + all_users
-                    # Default: If manager, default to self. 
                     default_idx = 0
                     if current_user in assign_options:
                         default_idx = assign_options.index(current_user)
                     
                     assign_to = st.selectbox("Assign To (Optional)", assign_options, index=default_idx)
-                    
-                    # Handle 'Unassigned' -> None logic if needed, or keep string "Unassigned"
                     final_assign = assign_to if assign_to != "Unassigned" else None
 
                 with c4: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
@@ -338,8 +366,12 @@ def main():
                 
                 if st.button("Add Task", type="primary", use_container_width=True):
                     if desc:
-                        if add_task(current_user, final_assign, desc, prio, due, selected_project, coordinator, email_subj, points):
+                        # Use final_coordinator determined above
+                        coord_to_save = final_coordinator if final_coordinator else "General"
+                        if add_task(current_user, final_assign, desc, prio, due, selected_project, coord_to_save, email_subj, points):
                             st.toast(f"✅ Task created!")
+                            time.sleep(1)
+                            st.rerun()
                     else: st.warning("Description required.")
 
         elif nav_mode == "My Diary":
@@ -388,7 +420,6 @@ def main():
                         if not proj: proj = "General"
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                         
-                        # Handle Null Assignment Display
                         assign_display = row['assigned_to'] if row['assigned_to'] else "Unassigned"
                         assign_label = f" ➝ {assign_display.split('@')[0].title()}" if (is_manager) else ""
                         
@@ -398,7 +429,6 @@ def main():
                                 c_edit_1, c_edit_2 = st.columns([2, 1])
                                 new_desc = c_edit_1.text_input("Description", value=row['task_desc'])
                                 
-                                # Use safe access for new columns in case existing rows are null
                                 curr_points = row.get('points', '') if pd.notna(row.get('points')) else ""
                                 curr_subj = row.get('email_subject', '') if pd.notna(row.get('email_subject')) else ""
                                 
@@ -413,12 +443,10 @@ def main():
                                 default_prio_idx = prio_options.index(row['priority']) if row['priority'] in prio_options else 1
                                 new_prio = c_edit_4.selectbox("Priority", prio_options, index=default_prio_idx)
                                 
-                                # Manager can reassign
                                 new_assign = None
                                 if is_manager:
                                     all_users = get_active_users()
                                     curr_assign = row['assigned_to'] if row['assigned_to'] else "Unassigned"
-                                    # Logic to set index safely
                                     assign_opts = ["Unassigned"] + all_users
                                     def_idx = assign_opts.index(curr_assign) if curr_assign in assign_opts else 0
                                     new_assign_sel = c_edit_5.selectbox("Reassign To", assign_opts, index=def_idx)
