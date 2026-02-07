@@ -89,26 +89,18 @@ def get_ai_summary(task_dataframe):
         return response.content
     except Exception as e: return f"AI Error: {str(e)}"
 
-# --- DATA FUNCTIONS (CRASH PROOF SYNC) ---
+# --- SYNC LOGIC ---
 def sync_projects():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(worksheet="ROADMAP", ttl=0) 
-        
         if df.empty: return False, "⚠️ Sheet is empty or missing 'ROADMAP' tab."
 
-        # 1. Clean Column Headers (Remove hidden spaces like "Vendor ")
-        df.columns = df.columns.str.strip()
-
-        # 2. Clean Data (Force all to string, replace NaN with empty string)
         df = df.fillna("").astype(str)
-        
         count = 0
         for index, row in df.iterrows():
-            # Validate Name
             if row.get('Interface Name', '').strip() == '': continue
             
-            # Extract safely with stripped keys
             p_name = row.get('Interface Name', '').strip()
             p_status = row.get('Status', '').strip()
             p_desc = row.get('Particulars', '').strip()
@@ -121,16 +113,14 @@ def sync_projects():
                 "vendor": p_vendor
             }
             try:
-                # Upsert into DB
                 supabase.table("projects").upsert(data, on_conflict="name").execute()
                 count += 1
             except Exception as row_error:
-                print(f"Skipped {p_name}: {row_error}")
+                print(f"Row skipped {p_name}: {row_error}")
                 continue
             
         get_projects.clear()
         return True, f"✅ Synced {count} Projects!"
-        
     except Exception as e:
         return False, f"❌ Sync Error: {str(e)}"
 
@@ -142,18 +132,34 @@ def get_projects():
     except: return []
 
 # --- TASK FUNCTIONS ---
-def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref):
+# Updated to include new fields: coordinator, email_subject, points
+def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref, coordinator, email_subject, points):
     try:
         final_date = str(due_date) if due_date else str(date.today())
         final_project = project_ref if project_ref else "General"
+        # If assigned_to is "None" (optional), send None to DB if column allows null, 
+        # but usually it's better to assign to creator or keep as is. 
+        # Assuming table allows null or we send empty string if logic requires.
+        
         data = {
-            "created_by": created_by, "assigned_to": assigned_to, "task_desc": task_desc,
-            "status": "Open", "priority": priority, "due_date": final_date,
-            "project_ref": final_project, "staff_remarks": "", "manager_remarks": ""
+            "created_by": created_by, 
+            "assigned_to": assigned_to, 
+            "task_desc": task_desc,
+            "status": "Open", 
+            "priority": priority, 
+            "due_date": final_date,
+            "project_ref": final_project, 
+            "staff_remarks": "", 
+            "manager_remarks": "",
+            "coordinator": coordinator,
+            "email_subject": email_subject,
+            "points": points
         }
         supabase.table("tasks").insert(data).execute()
         return True
-    except: return False
+    except Exception as e:
+        st.error(f"Add Task Error: {e}")
+        return False
 
 def get_tasks(target_email=None):
     query = supabase.table("tasks").select("*")
@@ -161,7 +167,6 @@ def get_tasks(target_email=None):
     response = query.execute()
     return pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
-# Standard Status Update
 def update_task_status(task_id, new_status, remarks=None):
     try:
         data = {"status": new_status}
@@ -170,15 +175,21 @@ def update_task_status(task_id, new_status, remarks=None):
         return True
     except: return False
 
-# FULL EDIT: Update all fields of a task
-def update_task_full(task_id, desc, due_date, priority, remarks):
+# Updated full edit function
+def update_task_full(task_id, new_desc, new_date, new_prio, new_remarks, new_assign, new_points, new_subject, is_manager):
     try:
         data = {
-            "task_desc": desc,
-            "due_date": str(due_date),
-            "priority": priority,
-            "staff_remarks": remarks
+            "task_desc": new_desc,
+            "due_date": str(new_date),
+            "priority": new_prio,
+            "staff_remarks": new_remarks,
+            "points": new_points,
+            "email_subject": new_subject
         }
+        # Only manager can update assigned_to
+        if is_manager and new_assign:
+            data["assigned_to"] = new_assign
+            
         supabase.table("tasks").update(data).eq("id", task_id).execute()
         return True
     except Exception as e:
@@ -288,7 +299,6 @@ def main():
                             toggle_user_status(u['email'], u['status']); st.rerun()
             else: st.info("No users found.")
 
-        # --- UPDATED: NEW TASK (Smart Default User) ---
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             with st.container(border=True):
@@ -297,25 +307,41 @@ def main():
                 with c2:
                     project_list = get_projects()
                     selected_project = st.selectbox("Project", ["General"] + project_list)
+                
+                # New Row for Coordinator and Subject
+                c_new_1, c_new_2 = st.columns(2)
+                with c_new_1:
+                    coordinator = st.selectbox("Point Coordinator (Source)", ["Sales Team", "Client", "Support Team", "Internal", "Management"])
+                with c_new_2:
+                    email_subj = st.text_input("Email Subject (for tracking)", placeholder="Optional: Paste email subject here")
+
+                # Detailed Points
+                points = st.text_area("Detailed Points / Checklist (One per line)", height=100)
+
                 c3, c4, c5 = st.columns(3)
                 with c3:
-                    if is_manager:
-                        all_users = get_active_users()
-                        # LOGIC: Find index of current user to set as default
-                        default_idx = 0
-                        if current_user in all_users:
-                            default_idx = all_users.index(current_user)
-                        assign_to = st.selectbox("Assign To", all_users, index=default_idx)
-                    else: assign_to = st.selectbox("Assign To", [current_user], disabled=True)
+                    all_users = get_active_users()
+                    # Optional Assignment Logic
+                    assign_options = ["Unassigned"] + all_users
+                    # Default: If manager, default to self. 
+                    default_idx = 0
+                    if current_user in assign_options:
+                        default_idx = assign_options.index(current_user)
+                    
+                    assign_to = st.selectbox("Assign To (Optional)", assign_options, index=default_idx)
+                    
+                    # Handle 'Unassigned' -> None logic if needed, or keep string "Unassigned"
+                    final_assign = assign_to if assign_to != "Unassigned" else None
+
                 with c4: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"])
                 with c5: due = st.date_input("Due Date", value=date.today())
+                
                 if st.button("Add Task", type="primary", use_container_width=True):
                     if desc:
-                        if add_task(current_user, assign_to, desc, prio, due, selected_project):
-                            st.toast(f"✅ Task assigned to {assign_to}!")
+                        if add_task(current_user, final_assign, desc, prio, due, selected_project, coordinator, email_subj, points):
+                            st.toast(f"✅ Task created!")
                     else: st.warning("Description required.")
 
-        # --- UPDATED: MY DIARY (Full Edit Mode) ---
         elif nav_mode == "My Diary":
             df = pd.DataFrame()
             if is_manager:
@@ -361,33 +387,53 @@ def main():
                         proj = row.get('project_ref', 'General')
                         if not proj: proj = "General"
                         priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
-                        assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and 'assigned_to' in row) else ""
                         
-                        # --- FULL EDIT UI ---
+                        # Handle Null Assignment Display
+                        assign_display = row['assigned_to'] if row['assigned_to'] else "Unassigned"
+                        assign_label = f" ➝ {assign_display.split('@')[0].title()}" if (is_manager) else ""
+                        
                         with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
                             
                             with st.form(key=f"edit_form_{row['id']}"):
                                 c_edit_1, c_edit_2 = st.columns([2, 1])
                                 new_desc = c_edit_1.text_input("Description", value=row['task_desc'])
+                                
+                                # Use safe access for new columns in case existing rows are null
+                                curr_points = row.get('points', '') if pd.notna(row.get('points')) else ""
+                                curr_subj = row.get('email_subject', '') if pd.notna(row.get('email_subject')) else ""
+                                
+                                new_points = c_edit_1.text_area("Detailed Points / Checklist", value=curr_points, height=100)
+                                new_subject = c_edit_1.text_input("Email Subject", value=curr_subj)
+
                                 new_rem = c_edit_2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
                                 
-                                c_edit_3, c_edit_4 = st.columns([1, 1])
+                                c_edit_3, c_edit_4, c_edit_5 = st.columns(3)
                                 new_date = c_edit_3.date_input("Due Date", value=row['due_date'])
-                                # Safely handle priority default
                                 prio_options = ["🔥 High", "⚡ Medium", "🧊 Low"]
                                 default_prio_idx = prio_options.index(row['priority']) if row['priority'] in prio_options else 1
                                 new_prio = c_edit_4.selectbox("Priority", prio_options, index=default_prio_idx)
+                                
+                                # Manager can reassign
+                                new_assign = None
+                                if is_manager:
+                                    all_users = get_active_users()
+                                    curr_assign = row['assigned_to'] if row['assigned_to'] else "Unassigned"
+                                    # Logic to set index safely
+                                    assign_opts = ["Unassigned"] + all_users
+                                    def_idx = assign_opts.index(curr_assign) if curr_assign in assign_opts else 0
+                                    new_assign_sel = c_edit_5.selectbox("Reassign To", assign_opts, index=def_idx)
+                                    new_assign = new_assign_sel if new_assign_sel != "Unassigned" else None
+                                else:
+                                    c_edit_5.text_input("Assigned To", value=row['assigned_to'], disabled=True)
 
                                 c_btn_a, c_btn_b = st.columns(2)
                                 
-                                # SAVE BUTTON
                                 if c_btn_a.form_submit_button("💾 Save Changes"):
-                                    if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem):
+                                    if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, is_manager):
                                         st.toast("✅ Task Updated Successfully!")
                                         time.sleep(0.5)
                                         st.rerun()
                                 
-                                # COMPLETE BUTTON
                                 if c_btn_b.form_submit_button("✅ Mark Completed"):
                                     update_task_status(row['id'], "Completed", new_rem)
                                     st.rerun()
