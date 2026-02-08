@@ -147,9 +147,9 @@ def get_unique_column_values(column_name):
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref, coordinator, email_subject, points):
     try:
         final_date = str(due_date) if due_date else str(date.today())
-        # Default fallbacks
-        final_project = project_ref if project_ref else "General"
-        final_coord = coordinator if coordinator else "General"
+        # Final fallback check
+        final_project = project_ref if project_ref and project_ref.strip() != "" else "General"
+        final_coord = coordinator if coordinator and coordinator.strip() != "" else "General"
         
         data = {
             "created_by": created_by, 
@@ -321,11 +321,11 @@ def main():
                     used_projects = get_unique_column_values("project_ref") 
                     all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
                     
-                    # Logic: Selectbox with "Type New" option
                     proj_sel = st.selectbox("Project", ["Select..."] + all_projects + ["➕ Type New..."])
                     
+                    selected_project = None
                     if proj_sel == "➕ Type New...":
-                        selected_project = st.text_input("Enter New Project Name", key="new_proj_in")
+                        selected_project = st.text_input("Enter New Project Name", key="new_proj_input")
                     elif proj_sel == "Select...":
                         selected_project = "General"
                     else:
@@ -340,8 +340,9 @@ def main():
                     
                     coord_sel = st.selectbox("Point Coordinator", ["Select..."] + all_coords + ["➕ Type New..."])
                     
+                    final_coordinator = None
                     if coord_sel == "➕ Type New...":
-                        final_coordinator = st.text_input("Enter New Coordinator Name", key="new_coord_in")
+                        final_coordinator = st.text_input("Enter New Coordinator Name", key="new_coord_input")
                     elif coord_sel == "Select...":
                         final_coordinator = "General"
                     else:
@@ -368,20 +369,9 @@ def main():
                 
                 if st.button("Add Task", type="primary", use_container_width=True):
                     if desc:
-                        # Use inputs if provided, else defaults
-                        # Logic to capture the typed new value if mode is "Type New"
-                        
-                        proj_to_save = "General"
-                        if proj_sel == "➕ Type New...":
-                             if selected_project: proj_to_save = selected_project
-                        elif proj_sel != "Select...":
-                             proj_to_save = proj_sel
-                             
-                        coord_to_save = "General"
-                        if coord_sel == "➕ Type New...":
-                            if final_coordinator: coord_to_save = final_coordinator
-                        elif coord_sel != "Select...":
-                            coord_to_save = coord_sel
+                        # LOGIC: Ensure we capture the 'Type New' text if visible
+                        proj_to_save = selected_project if selected_project else "General"
+                        coord_to_save = final_coordinator if final_coordinator else "General"
                         
                         if add_task(current_user, final_assign, desc, prio, due, proj_to_save, coord_to_save, email_subj, points):
                             st.toast(f"✅ Task created!")
@@ -523,6 +513,7 @@ def main():
                                 # Buttons
                                 b1, b2 = st.columns(2)
                                 if b1.form_submit_button("💾 Save Changes"):
+                                    # Fallbacks
                                     if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, new_coord_final, new_proj_final, is_manager):
                                         st.toast("✅ Task Updated Successfully!")
                                         time.sleep(0.5)
