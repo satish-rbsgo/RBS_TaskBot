@@ -16,10 +16,14 @@ st.markdown("""
     .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
     p, .stMarkdown { font-size: 14px !important; margin-bottom: 0px !important; }
     h1, h2, h3 { margin-bottom: 0.5rem !important; margin-top: 0rem !important; }
+    
+    /* Make the New Task Expander look like a big Action Button */
     .streamlit-expanderHeader { 
         padding-top: 8px !important; padding-bottom: 8px !important; 
         background-color: #f0f2f6; border-radius: 8px; font-weight: bold;
+        border: 1px solid #e0e0e0;
     }
+    
     .stButton button { width: 100%; border-radius: 5px; height: 2.5rem; }
     section[data-testid="stSidebar"] .block-container { padding-top: 2rem; }
     
@@ -128,7 +132,7 @@ def sync_projects():
                 print(f"Row skipped {p_name}: {row_error}")
                 continue
             
-        get_projects_master.clear() # Clear cache to refresh
+        get_projects_master.clear() # Clear cache
         return True, f"✅ Synced {count} Projects!"
     except Exception as e:
         return False, f"❌ Sync Error: {str(e)}"
@@ -171,7 +175,7 @@ def load_data_efficiently(target_email=None):
 
     return df, all_projects, all_coords
 
-# --- HELPER: GET UNIQUE VALUES (Kept for Edit Mode individual checks) ---
+# --- HELPER: GET UNIQUE VALUES (Legacy helper for Edit Mode) ---
 def get_unique_column_values(column_name):
     try:
         response = supabase.table("tasks").select(column_name).execute()
@@ -356,7 +360,7 @@ def main():
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             
-            # Use Efficient Loading Here Too
+            # Efficient Load
             _, all_projects, all_coords = load_data_efficiently(None) 
             
             with st.form("new_task_page_form", clear_on_submit=True):
@@ -370,10 +374,8 @@ def main():
                         st.write("") # Spacer
                         is_new_proj = st.checkbox("New", key="tog_p_page")
                     with c2a:
-                        if is_new_proj:
-                            selected_project = st.text_input("Type Project Name", key="nt_p_txt")
-                        else:
-                            selected_project = st.selectbox("Project", all_projects, key="nt_p_sel")
+                        if is_new_proj: selected_project = st.text_input("Type Project Name", key="nt_p_txt")
+                        else: selected_project = st.selectbox("Project", all_projects, key="nt_p_sel")
                 
                 with c3:
                     # Toggle Inside Column
@@ -382,10 +384,8 @@ def main():
                         st.write("") # Spacer
                         is_new_coord = st.checkbox("New", key="tog_c_page")
                     with c3a:
-                        if is_new_coord:
-                            final_coordinator = st.text_input("Type Coordinator Name", key="nt_c_txt")
-                        else:
-                            final_coordinator = st.selectbox("Point Coordinator", all_coords, key="nt_c_sel")
+                        if is_new_coord: final_coordinator = st.text_input("Type Coordinator Name", key="nt_c_txt")
+                        else: final_coordinator = st.selectbox("Point Coordinator", all_coords, key="nt_c_sel")
 
                 c4, c5 = st.columns(2)
                 with c4: email_subj = st.text_input("Email Subject", placeholder="Optional", key="nt_sub")
@@ -433,7 +433,7 @@ def main():
             # --- SUPER FAST ONE-TIME LOAD ---
             df, all_projects, all_coords = load_data_efficiently(view_email)
 
-            # --- 2. NEW TASK EXPANDER ---
+            # --- 2. NEW TASK EXPANDER (Collapsed Button) ---
             with st.expander("➕ Create New Task", expanded=False):
                 with st.form("dash_quick_add", clear_on_submit=True):
                     st.text_input("Task Description", placeholder="What needs to be done?", key="d_desc")
@@ -483,9 +483,11 @@ def main():
                             coord_save = final_coordinator if final_coordinator else "General"
                             if add_task(current_user, final_assign, st.session_state.d_desc, prio, due, proj_save, coord_save, email_subj, points):
                                 st.toast("✅ Added!")
-                                time.sleep(0.1)
+                                time.sleep(0.01)
                                 st.rerun()
-            
+                        else:
+                            st.warning("Desc required.")
+
             # --- 3. TASK LIST RENDER ---
             if not df.empty:
                 df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
@@ -515,92 +517,64 @@ def main():
                 if filtered.empty: 
                     st.info(f"✅ No tasks found for '{selected_filter}'.")
                 else:
+                    # SCROLLABLE CONTAINER
                     with st.container(height=600):
                         for index, row in filtered.iterrows():
                             d_str = row['due_date'].strftime('%d-%b')
                             proj = row.get('project_ref', 'General')
-                            if not proj: proj = "General"
                             priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
-                            
                             assign_display = row['assigned_to'] if row['assigned_to'] else "Unassigned"
                             assign_label = f" ➝ {assign_display.split('@')[0].title()}" if (is_manager) else ""
                             
                             with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
                                 
-                                with st.form(key=f"edit_form_{row['id']}"):
-                                    c_edit_1, c_edit_2 = st.columns([2, 1])
-                                    new_desc = c_edit_1.text_input("Description", value=row['task_desc'])
-                                    new_rem = c_edit_2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
+                                with st.form(key=f"edit_{row['id']}"):
+                                    e1, e2 = st.columns([2, 1])
+                                    new_desc = e1.text_input("Desc", value=row['task_desc'])
+                                    new_rem = e2.text_input("Rem", value=row['staff_remarks'] if row['staff_remarks'] else "")
                                     
-                                    c3, c4 = st.columns(2)
-                                    curr_points = row.get('points', '') if pd.notna(row.get('points')) else ""
-                                    new_points = c3.text_area("Detailed Points", value=curr_points, height=100)
-                                    
-                                    # Edit Logic: Coordinator
-                                    curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
-                                    # Add current value to list if missing
-                                    edit_coords = sorted(list(set(all_coords + [curr_coord])))
-                                    
-                                    c4a, c4b = c4.columns([3, 1])
-                                    with c4b: 
+                                    e3, e4 = st.columns(2)
+                                    # Edit Project + Toggle
+                                    curr_proj = row.get('project_ref', 'General')
+                                    edit_projs = sorted(list(set(all_projects + [curr_proj])))
+                                    ep1, ep2 = e3.columns([3,1])
+                                    with ep2: 
                                         st.write("")
-                                        edit_new_coord = st.checkbox("New", key=f"chk_nc_{row['id']}")
-                                    with c4a:
-                                        if edit_new_coord: new_coord = st.text_input("Coord Name", key=f"txt_nc_{row['id']}")
+                                        is_new_p_e = st.checkbox("New", key=f"np_{row['id']}")
+                                    with ep1:
+                                        if is_new_p_e: new_proj = st.text_input("Project", key=f"tp_{row['id']}")
+                                        else: 
+                                            try: p_idx = edit_projs.index(curr_proj)
+                                            except: p_idx = 0
+                                            new_proj = st.selectbox("Project", edit_projs, index=p_idx, key=f"sp_{row['id']}")
+
+                                    # Edit Coord + Toggle
+                                    curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
+                                    edit_coords = sorted(list(set(all_coords + [curr_coord])))
+                                    ec1, ec2 = e4.columns([3,1])
+                                    with ec2:
+                                        st.write("")
+                                        is_new_c_e = st.checkbox("New", key=f"nc_{row['id']}")
+                                    with ec1:
+                                        if is_new_c_e: new_coord = st.text_input("Coord", key=f"tc_{row['id']}")
                                         else:
                                             try: c_idx = edit_coords.index(curr_coord)
                                             except: c_idx = 0
-                                            new_coord = st.selectbox("Coordinator", edit_coords, index=c_idx, key=f"sel_nc_{row['id']}")
+                                            new_coord = st.selectbox("Coord", edit_coords, index=c_idx, key=f"sc_{row['id']}")
 
-                                    # Edit Logic: Project
-                                    c5, c6 = st.columns(2)
-                                    curr_proj = row.get('project_ref', 'General')
-                                    edit_projs = sorted(list(set(all_projects + [curr_proj])))
-                                    
-                                    c5a, c5b = c5.columns([3, 1])
-                                    with c5b: 
-                                        st.write("")
-                                        edit_new_proj = st.checkbox("New", key=f"chk_np_{row['id']}")
-                                    with c5a:
-                                        if edit_new_proj: new_proj = st.text_input("Proj Name", key=f"txt_np_{row['id']}")
-                                        else:
-                                            try: p_idx = edit_projs.index(curr_proj)
-                                            except: p_idx = 0
-                                            new_proj = st.selectbox("Project", edit_projs, index=p_idx, key=f"sel_np_{row['id']}")
-
-                                    curr_subj = row.get('email_subject', '') if pd.notna(row.get('email_subject')) else ""
-                                    new_subject = c6.text_input("Email Subject", value=curr_subj)
-
-                                    c7, c8, c9 = st.columns(3)
-                                    new_date = c7.date_input("Due Date", value=row['due_date'])
-                                    
-                                    prio_options = ["🔥 High", "⚡ Medium", "🧊 Low"]
-                                    try: prio_idx = prio_options.index(row['priority'])
-                                    except: prio_idx = 1
-                                    new_prio = c8.selectbox("Priority", prio_options, index=prio_idx)
-                                    
-                                    new_assign = None
-                                    if is_manager:
-                                        all_users_list = get_active_users()
-                                        curr_assign = row['assigned_to'] if row['assigned_to'] else "Unassigned"
-                                        assign_opts = ["Unassigned"] + all_users_list
-                                        try: def_idx = assign_opts.index(curr_assign)
-                                        except: def_idx = 0
-                                        new_assign_sel = c9.selectbox("Reassign To", assign_opts, index=def_idx)
-                                        new_assign = new_assign_sel if new_assign_sel != "Unassigned" else None
-                                    else:
-                                        c9.text_input("Assigned To", value=row['assigned_to'], disabled=True)
+                                    curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
+                                    new_points = st.text_area("Points", value=curr_pts, height=80)
 
                                     b1, b2 = st.columns(2)
-                                    if b1.form_submit_button("💾 Save Changes"):
+                                    if b1.form_submit_button("💾 Save"):
                                         final_c = new_coord if new_coord else curr_coord
                                         final_p = new_proj if new_proj else curr_proj
-                                        if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, final_c, final_p, is_manager):
-                                            st.toast("✅ Updated!")
-                                            time.sleep(0.1)
+                                        if update_task_full(row['id'], new_desc, row['due_date'], row['priority'], new_rem, row['assigned_to'], new_points, row['email_subject'], final_c, final_p, is_manager):
+                                            st.toast("Updated!")
+                                            time.sleep(0.01)
                                             st.rerun()
                                     
-                                    if b2.form_submit_button("✅ Mark Completed"):
+                                    if b2.form_submit_button("✅ Done"):
                                         update_task_status(row['id'], "Completed", new_rem)
                                         st.rerun()
 
