@@ -142,7 +142,6 @@ def get_projects():
 
 # --- HELPER: GET UNIQUE VALUES ---
 def get_unique_column_values(column_name):
-    """Fetches unique values for any column (e.g., coordinator, project_ref)"""
     try:
         response = supabase.table("tasks").select(column_name).execute()
         if response.data:
@@ -220,10 +219,6 @@ def main():
     if 'user_role' not in st.session_state: st.session_state['user_role'] = None
     if 'user_name' not in st.session_state: st.session_state['user_name'] = None
 
-    # INIT SESSION STATE VARIABLES FOR TOGGLES
-    if 'is_new_proj' not in st.session_state: st.session_state.is_new_proj = False
-    if 'is_new_coord' not in st.session_state: st.session_state.is_new_coord = False
-
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -254,9 +249,9 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # Dashboard is the main view now
-            menu_options = ["Dashboard"] 
-            menu_icons = ["journal-bookmark"]
+            # --- RESTORED SEPARATE MENU ITEMS ---
+            menu_options = ["Dashboard", "New Task"] 
+            menu_icons = ["journal-bookmark", "plus-circle"]
             
             if is_manager:
                 menu_options.append("Sync Roadmap")
@@ -323,80 +318,64 @@ def main():
                             toggle_user_status(u['email'], u['status']); st.rerun()
             else: st.info("No users found.")
 
-        # --- DASHBOARD VIEW (MAIN) ---
-        elif nav_mode == "Dashboard":
-            # --- 1. NEW TASK SECTION (Collapsible & Auto-Clearing) ---
-            # Set expanded=True so it's visible by default
-            with st.expander("➕ Create New Task", expanded=True):
+        # --- SEPARATE NEW TASK PAGE ---
+        elif nav_mode == "New Task":
+            st.header("✨ Create New Task")
+            
+            # Toggles OUTSIDE form
+            c_head1, c_head2 = st.columns(2)
+            with c_head1: toggle_proj = st.toggle("Type New Project?", key="tog_proj_page")
+            with c_head2: toggle_coord = st.toggle("Type New Coordinator?", key="tog_coord_page")
+
+            with st.form("new_task_page_form", clear_on_submit=True):
+                st.text_input("Task Description", placeholder="What needs to be done?", key="nt_desc")
                 
-                # Checkbox Toggles for "New" (Outside form so they update UI instantly)
-                c_head1, c_head2 = st.columns(2)
-                with c_head1: 
-                    toggle_proj = st.toggle("Type New Project?", key="tog_proj")
-                with c_head2:
-                    toggle_coord = st.toggle("Type New Coordinator?", key="tog_coord")
+                c2, c3 = st.columns(2)
+                with c2:
+                    if toggle_proj:
+                        selected_project = st.text_input("New Project Name", key="nt_proj_txt")
+                    else:
+                        synced_projects = get_projects()
+                        used_projects = get_unique_column_values("project_ref")
+                        all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
+                        selected_project = st.selectbox("Project", all_projects, key="nt_proj_sel")
+                with c3:
+                    if toggle_coord:
+                        final_coordinator = st.text_input("New Coordinator", key="nt_coord_txt")
+                    else:
+                        existing_coords = get_unique_column_values("coordinator")
+                        base_coords = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
+                        all_coords = sorted(list(set(base_coords + existing_coords)))
+                        final_coordinator = st.selectbox("Point Coordinator", all_coords, key="nt_coord_sel")
 
-                with st.form("quick_add_task", clear_on_submit=True):
-                    # Description
-                    st.text_input("Task Description", placeholder="What needs to be done?", key="new_desc")
-                    
-                    # Row 2: Project & Coordinator
-                    c2, c3 = st.columns(2)
-                    
-                    with c2:
-                        if toggle_proj:
-                            selected_project = st.text_input("New Project Name", key="n_p_txt")
-                        else:
-                            synced_projects = get_projects()
-                            used_projects = get_unique_column_values("project_ref")
-                            all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
-                            selected_project = st.selectbox("Project", all_projects, key="n_p_sel")
+                c4, c5 = st.columns(2)
+                with c4: email_subj = st.text_input("Email Subject", placeholder="Optional", key="nt_sub")
+                with c5: points = st.text_area("Detailed Points", height=1, placeholder="One per line...", key="nt_pts")
 
-                    with c3:
-                        if toggle_coord:
-                            final_coordinator = st.text_input("New Coordinator", key="n_c_txt")
-                        else:
-                            existing_coords = get_unique_column_values("coordinator")
-                            base_coords = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
-                            all_coords = sorted(list(set(base_coords + existing_coords)))
-                            final_coordinator = st.selectbox("Point Coordinator", all_coords, key="n_c_sel")
+                c6, c7, c8 = st.columns(3)
+                with c6:
+                    all_users = get_active_users()
+                    assign_options = ["Unassigned"] + all_users
+                    d_idx = assign_options.index(current_user) if current_user in assign_options else 0
+                    assign_to = st.selectbox("Assign To", assign_options, index=d_idx, key="nt_ass")
+                    final_assign = assign_to if assign_to != "Unassigned" else None
+                with c7: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"], key="nt_pri")
+                with c8: due = st.date_input("Due Date", value=date.today(), key="nt_due")
 
-                    # Row 3: Meta
-                    c4, c5 = st.columns(2)
-                    with c4: email_subj = st.text_input("Email Subject", placeholder="Optional", key="n_sub")
-                    with c5: points = st.text_area("Detailed Points", height=1, placeholder="One per line...", key="n_pts")
+                submitted = st.form_submit_button("🚀 Add Task", type="primary", use_container_width=True)
 
-                    # Row 4: Assign & Save
-                    c6, c7, c8, c9 = st.columns([2, 1, 1, 1])
-                    with c6:
-                        all_users = get_active_users()
-                        assign_options = ["Unassigned"] + all_users
-                        d_idx = assign_options.index(current_user) if current_user in assign_options else 0
-                        assign_to = st.selectbox("Assign To", assign_options, index=d_idx, key="n_ass")
-                        final_assign = assign_to if assign_to != "Unassigned" else None
-                    with c7: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"], key="n_pri")
-                    with c8: due = st.date_input("Due Date", value=date.today(), key="n_due")
-                    with c9:
-                        st.write("") # Spacer
-                        st.write("") # Spacer
-                        # Form submit button
-                        submitted = st.form_submit_button("🚀 Add Task", type="primary", use_container_width=True)
-                    
-                    if submitted:
-                        if st.session_state.new_desc:
-                            # Logic to pick correct value based on toggle state
-                            proj_save = selected_project if selected_project else "General"
-                            coord_save = final_coordinator if final_coordinator else "General"
-                            
-                            # Fast Save
-                            add_task(current_user, final_assign, st.session_state.new_desc, prio, due, proj_save, coord_save, email_subj, points)
-                            st.toast("✅ Task Added Successfully!")
+                if submitted:
+                    if st.session_state.nt_desc:
+                        proj_save = selected_project if selected_project else "General"
+                        coord_save = final_coordinator if final_coordinator else "General"
+                        if add_task(current_user, final_assign, st.session_state.nt_desc, prio, due, proj_save, coord_save, email_subj, points):
+                            st.toast("✅ Task Added!")
                             time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.warning("Description required.")
+                            # Redirect to Dashboard? Or just stay here. 
+                            # st.rerun() works to clear form.
 
-            # --- 2. DIARY VIEW ---
+        # --- DASHBOARD (DIARY) VIEW ---
+        elif nav_mode == "Dashboard":
             df = pd.DataFrame()
             if is_manager:
                 c_filter, c_title = st.columns([1, 3])
@@ -414,7 +393,6 @@ def main():
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
                 
-                # Filters
                 c_all = len(active_df)
                 c_today = len(active_df[active_df['due_date'] == today_ts])
                 c_tmrw = len(active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)])
@@ -428,7 +406,6 @@ def main():
                     styles={"container": {"padding": "0!important", "background-color": "#fafafa"}}
                 )
                 
-                # Filter Logic
                 if "Today" in selected_filter: filtered = active_df[active_df['due_date'] == today_ts]
                 elif "Tomorrow" in selected_filter: filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
                 elif "Overdue" in selected_filter: filtered = active_df[active_df['due_date'] < today_ts]
@@ -439,8 +416,6 @@ def main():
                 if filtered.empty: 
                     st.info(f"✅ No tasks found for '{selected_filter}'.")
                 else:
-                    # --- SCROLLABLE CONTAINER (FIXED HEIGHT) ---
-                    # This keeps the filters/header stuck at the top while tasks scroll
                     with st.container(height=600):
                         filtered = filtered.sort_values(by=["due_date", "priority"], ascending=[True, True])
                         
@@ -460,40 +435,35 @@ def main():
                                     new_desc = c_edit_1.text_input("Description", value=row['task_desc'])
                                     new_rem = c_edit_2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
                                     
-                                    # Edit Logic: Details
                                     c3, c4 = st.columns(2)
                                     curr_points = row.get('points', '') if pd.notna(row.get('points')) else ""
                                     new_points = c3.text_area("Detailed Points", value=curr_points, height=100)
                                     
-                                    # Edit Logic: Coordinator (Toggle)
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     existing_coords_edit = get_unique_column_values("coordinator")
                                     all_coords_edit = sorted(list(set(["General"] + existing_coords_edit + [curr_coord])))
                                     
-                                    # Toggle for Edit Coordinator
+                                    # Edit Toggle Coordinator
                                     c4a, c4b = c4.columns([3, 1])
                                     with c4b: edit_new_coord = st.checkbox("New?", key=f"chk_nc_{row['id']}")
                                     with c4a:
-                                        if edit_new_coord:
-                                            new_coord = st.text_input("Coord Name", key=f"txt_nc_{row['id']}")
+                                        if edit_new_coord: new_coord = st.text_input("Coord Name", key=f"txt_nc_{row['id']}")
                                         else:
                                             try: c_idx = all_coords_edit.index(curr_coord)
                                             except: c_idx = 0
                                             new_coord = st.selectbox("Coordinator", all_coords_edit, index=c_idx, key=f"sel_nc_{row['id']}")
 
-                                    # Edit Logic: Project (Toggle)
+                                    # Edit Toggle Project
                                     c5, c6 = st.columns(2)
                                     curr_proj = row.get('project_ref', 'General')
                                     synced_projects_edit = get_projects()
                                     used_projects_edit = get_unique_column_values("project_ref")
                                     all_projects_edit = sorted(list(set(synced_projects_edit + used_projects_edit + ["General"] + [curr_proj])))
                                     
-                                    # Toggle for Edit Project
                                     c5a, c5b = c5.columns([3, 1])
                                     with c5b: edit_new_proj = st.checkbox("New?", key=f"chk_np_{row['id']}")
                                     with c5a:
-                                        if edit_new_proj:
-                                            new_proj = st.text_input("Proj Name", key=f"txt_np_{row['id']}")
+                                        if edit_new_proj: new_proj = st.text_input("Proj Name", key=f"txt_np_{row['id']}")
                                         else:
                                             try: p_idx = all_projects_edit.index(curr_proj)
                                             except: p_idx = 0
@@ -526,7 +496,6 @@ def main():
                                     if b1.form_submit_button("💾 Save Changes"):
                                         final_c = new_coord if new_coord else curr_coord
                                         final_p = new_proj if new_proj else curr_proj
-                                        
                                         if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, final_c, final_p, is_manager):
                                             st.toast("✅ Updated!")
                                             time.sleep(0.5)
