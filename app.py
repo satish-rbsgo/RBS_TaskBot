@@ -220,6 +220,10 @@ def main():
     if 'user_role' not in st.session_state: st.session_state['user_role'] = None
     if 'user_name' not in st.session_state: st.session_state['user_name'] = None
 
+    # INIT SESSION STATE VARIABLES FOR TOGGLES
+    if 'is_new_proj' not in st.session_state: st.session_state.is_new_proj = False
+    if 'is_new_coord' not in st.session_state: st.session_state.is_new_coord = False
+
     if not st.session_state['logged_in']:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -250,7 +254,7 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # DASHBOARD IS THE MAIN VIEW
+            # Dashboard is the main view now
             menu_options = ["Dashboard"] 
             menu_icons = ["journal-bookmark"]
             
@@ -322,39 +326,40 @@ def main():
         # --- DASHBOARD VIEW (MAIN) ---
         elif nav_mode == "Dashboard":
             # --- 1. NEW TASK SECTION (Collapsible & Auto-Clearing) ---
-            with st.expander("➕ Create New Task", expanded=False):
+            # Set expanded=True so it's visible by default
+            with st.expander("➕ Create New Task", expanded=True):
+                
+                # Checkbox Toggles for "New" (Outside form so they update UI instantly)
+                c_head1, c_head2 = st.columns(2)
+                with c_head1: 
+                    toggle_proj = st.toggle("Type New Project?", key="tog_proj")
+                with c_head2:
+                    toggle_coord = st.toggle("Type New Coordinator?", key="tog_coord")
+
                 with st.form("quick_add_task", clear_on_submit=True):
                     # Description
                     st.text_input("Task Description", placeholder="What needs to be done?", key="new_desc")
                     
-                    # Row 2: Project & Coordinator with CHECKBOX Toggle
+                    # Row 2: Project & Coordinator
                     c2, c3 = st.columns(2)
                     
                     with c2:
-                        synced_projects = get_projects()
-                        used_projects = get_unique_column_values("project_ref")
-                        all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
-                        
-                        # Layout for Toggle
-                        cp1, cp2 = st.columns([3, 1])
-                        with cp2: 
-                            is_new_p = st.checkbox("New?", key="n_p_chk", help="Check to type a new Project")
-                        with cp1:
-                            if is_new_p: selected_project = st.text_input("New Project Name", key="n_p_txt")
-                            else: selected_project = st.selectbox("Project", all_projects, key="n_p_sel")
+                        if toggle_proj:
+                            selected_project = st.text_input("New Project Name", key="n_p_txt")
+                        else:
+                            synced_projects = get_projects()
+                            used_projects = get_unique_column_values("project_ref")
+                            all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
+                            selected_project = st.selectbox("Project", all_projects, key="n_p_sel")
 
                     with c3:
-                        existing_coords = get_unique_column_values("coordinator")
-                        base_coords = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
-                        all_coords = sorted(list(set(base_coords + existing_coords)))
-                        
-                        # Layout for Toggle
-                        cc1, cc2 = st.columns([3, 1])
-                        with cc2: 
-                            is_new_c = st.checkbox("New?", key="n_c_chk", help="Check to type a new Coordinator")
-                        with cc1:
-                            if is_new_c: final_coordinator = st.text_input("New Coordinator", key="n_c_txt")
-                            else: final_coordinator = st.selectbox("Point Coordinator", all_coords, key="n_c_sel")
+                        if toggle_coord:
+                            final_coordinator = st.text_input("New Coordinator", key="n_c_txt")
+                        else:
+                            existing_coords = get_unique_column_values("coordinator")
+                            base_coords = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
+                            all_coords = sorted(list(set(base_coords + existing_coords)))
+                            final_coordinator = st.selectbox("Point Coordinator", all_coords, key="n_c_sel")
 
                     # Row 3: Meta
                     c4, c5 = st.columns(2)
@@ -386,7 +391,6 @@ def main():
                             # Fast Save
                             add_task(current_user, final_assign, st.session_state.new_desc, prio, due, proj_save, coord_save, email_subj, points)
                             st.toast("✅ Task Added Successfully!")
-                            # No rerun needed because clear_on_submit handles the form, but rerun updates the list below
                             time.sleep(0.5)
                             st.rerun()
                         else:
@@ -520,7 +524,6 @@ def main():
 
                                     b1, b2 = st.columns(2)
                                     if b1.form_submit_button("💾 Save Changes"):
-                                        # Use fallback if user checked "New" but left empty
                                         final_c = new_coord if new_coord else curr_coord
                                         final_p = new_proj if new_proj else curr_proj
                                         
