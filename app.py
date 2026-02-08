@@ -132,12 +132,12 @@ def sync_projects():
                 print(f"Row skipped {p_name}: {row_error}")
                 continue
             
-        get_projects_master.clear() # Clear cache
+        get_projects_master.clear() # Clear cache to refresh
         return True, f"✅ Synced {count} Projects!"
     except Exception as e:
         return False, f"❌ Sync Error: {str(e)}"
 
-# --- OPTIMIZED DATA LOADING ---
+# --- OPTIMIZED DATA LOADING (THE SPEED FIX) ---
 @st.cache_data(ttl=300) # Cache project list for 5 mins
 def get_projects_master():
     try:
@@ -175,7 +175,7 @@ def load_data_efficiently(target_email=None):
 
     return df, all_projects, all_coords
 
-# --- HELPER: GET UNIQUE VALUES (Legacy helper for Edit Mode) ---
+# --- HELPER: GET UNIQUE VALUES (Kept for Edit Mode individual checks) ---
 def get_unique_column_values(column_name):
     try:
         response = supabase.table("tasks").select(column_name).execute()
@@ -360,7 +360,7 @@ def main():
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             
-            # Efficient Load
+            # Use Efficient Loading Here Too
             _, all_projects, all_coords = load_data_efficiently(None) 
             
             with st.form("new_task_page_form", clear_on_submit=True):
@@ -409,8 +409,7 @@ def main():
                         coord_save = final_coordinator if final_coordinator else "General"
                         if add_task(current_user, final_assign, st.session_state.nt_desc, prio, due, proj_save, coord_save, email_subj, points):
                             st.toast("✅ Task Added Successfully!")
-                            time.sleep(0.1)
-                            # st.rerun() 
+                            time.sleep(0.01)
                     else:
                         st.warning("Description required.")
 
@@ -483,7 +482,7 @@ def main():
                             coord_save = final_coordinator if final_coordinator else "General"
                             if add_task(current_user, final_assign, st.session_state.d_desc, prio, due, proj_save, coord_save, email_subj, points):
                                 st.toast("✅ Added!")
-                                time.sleep(0.01)
+                                time.sleep(0.01) # Minimized sleep
                                 st.rerun()
                         else:
                             st.warning("Desc required.")
