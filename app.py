@@ -147,7 +147,9 @@ def get_unique_column_values(column_name):
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref, coordinator, email_subject, points):
     try:
         final_date = str(due_date) if due_date else str(date.today())
+        # Default fallbacks
         final_project = project_ref if project_ref else "General"
+        final_coord = coordinator if coordinator else "General"
         
         data = {
             "created_by": created_by, 
@@ -159,7 +161,7 @@ def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref
             "project_ref": final_project, 
             "staff_remarks": "", 
             "manager_remarks": "",
-            "coordinator": coordinator,
+            "coordinator": final_coord,
             "email_subject": email_subject,
             "points": points
         }
@@ -315,14 +317,15 @@ def main():
                 with c1: desc = st.text_input("Task Description", placeholder="What needs to be done?")
                 with c2:
                     # 1. FETCH PREVIOUS PROJECTS
-                    # Get projects from Sheet sync OR previously used in tasks
-                    synced_projects = get_projects() # From 'projects' table
-                    used_projects = get_unique_column_values("project_ref") # From 'tasks' table usage
+                    synced_projects = get_projects() 
+                    used_projects = get_unique_column_values("project_ref") 
                     all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
                     
+                    # Logic: Selectbox with "Type New" option
                     proj_sel = st.selectbox("Project", ["Select..."] + all_projects + ["➕ Type New..."])
+                    
                     if proj_sel == "➕ Type New...":
-                        selected_project = st.text_input("Enter New Project Name")
+                        selected_project = st.text_input("Enter New Project Name", key="new_proj_in")
                     elif proj_sel == "Select...":
                         selected_project = "General"
                     else:
@@ -336,8 +339,9 @@ def main():
                     all_coords = sorted(list(set(base_coords + existing_coords)))
                     
                     coord_sel = st.selectbox("Point Coordinator", ["Select..."] + all_coords + ["➕ Type New..."])
+                    
                     if coord_sel == "➕ Type New...":
-                        final_coordinator = st.text_input("Enter New Coordinator Name")
+                        final_coordinator = st.text_input("Enter New Coordinator Name", key="new_coord_in")
                     elif coord_sel == "Select...":
                         final_coordinator = "General"
                     else:
@@ -364,8 +368,20 @@ def main():
                 
                 if st.button("Add Task", type="primary", use_container_width=True):
                     if desc:
-                        coord_to_save = final_coordinator if final_coordinator else "General"
-                        proj_to_save = selected_project if selected_project else "General"
+                        # Use inputs if provided, else defaults
+                        # Logic to capture the typed new value if mode is "Type New"
+                        
+                        proj_to_save = "General"
+                        if proj_sel == "➕ Type New...":
+                             if selected_project: proj_to_save = selected_project
+                        elif proj_sel != "Select...":
+                             proj_to_save = proj_sel
+                             
+                        coord_to_save = "General"
+                        if coord_sel == "➕ Type New...":
+                            if final_coordinator: coord_to_save = final_coordinator
+                        elif coord_sel != "Select...":
+                            coord_to_save = coord_sel
                         
                         if add_task(current_user, final_assign, desc, prio, due, proj_to_save, coord_to_save, email_subj, points):
                             st.toast(f"✅ Task created!")
@@ -427,22 +443,57 @@ def main():
                             
                             with st.form(key=f"edit_form_{row['id']}"):
                                 # Row 1: Desc & Remarks
-                                c1, c2 = st.columns([2, 1])
-                                new_desc = c1.text_input("Description", value=row['task_desc'])
-                                new_rem = c2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
+                                c_edit_1, c_edit_2 = st.columns([2, 1])
+                                new_desc = c_edit_1.text_input("Description", value=row['task_desc'])
+                                new_rem = c_edit_2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
                                 
-                                # Row 2: Details (Points, Subject, Coordinator) - NEW FIELDS ADDED HERE
+                                # Row 2: Details (Points, Subject, Coordinator) - IMPROVED EDIT
                                 c3, c4 = st.columns(2)
                                 curr_points = row.get('points', '') if pd.notna(row.get('points')) else ""
                                 new_points = c3.text_area("Detailed Points", value=curr_points, height=100)
                                 
-                                curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else ""
-                                new_coord = c4.text_input("Point Coordinator", value=curr_coord)
+                                # Coordinator Dropdown in Edit Mode
+                                curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
+                                existing_coords_edit = get_unique_column_values("coordinator")
+                                base_coords_edit = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
+                                all_coords_edit = sorted(list(set(base_coords_edit + existing_coords_edit + [curr_coord])))
+                                
+                                try:
+                                    coord_idx = all_coords_edit.index(curr_coord)
+                                except:
+                                    coord_idx = 0
+                                
+                                coord_sel_edit = c4.selectbox("Point Coordinator", all_coords_edit + ["➕ Type New..."], index=coord_idx, key=f"c_sel_{row['id']}")
+                                
+                                new_coord_final = curr_coord
+                                if coord_sel_edit == "➕ Type New...":
+                                    new_coord_input = c4.text_input("New Coordinator Name", key=f"c_txt_{row['id']}")
+                                    if new_coord_input: new_coord_final = new_coord_input
+                                else:
+                                    new_coord_final = coord_sel_edit
                                 
                                 # Row 3: Meta (Project, Email Subject)
                                 c5, c6 = st.columns(2)
+                                
+                                # Project Dropdown in Edit Mode
                                 curr_proj = row.get('project_ref', 'General')
-                                new_proj = c5.text_input("Project", value=curr_proj)
+                                synced_projects_edit = get_projects()
+                                used_projects_edit = get_unique_column_values("project_ref")
+                                all_projects_edit = sorted(list(set(synced_projects_edit + used_projects_edit + ["General"] + [curr_proj])))
+                                
+                                try:
+                                    proj_idx = all_projects_edit.index(curr_proj)
+                                except:
+                                    proj_idx = 0
+                                    
+                                proj_sel_edit = c5.selectbox("Project", all_projects_edit + ["➕ Type New..."], index=proj_idx, key=f"p_sel_{row['id']}")
+                                
+                                new_proj_final = curr_proj
+                                if proj_sel_edit == "➕ Type New...":
+                                    new_proj_input = c5.text_input("New Project Name", key=f"p_txt_{row['id']}")
+                                    if new_proj_input: new_proj_final = new_proj_input
+                                else:
+                                    new_proj_final = proj_sel_edit
                                 
                                 curr_subj = row.get('email_subject', '') if pd.notna(row.get('email_subject')) else ""
                                 new_subject = c6.text_input("Email Subject", value=curr_subj)
@@ -460,7 +511,10 @@ def main():
                                     all_users = get_active_users()
                                     curr_assign = row['assigned_to'] if row['assigned_to'] else "Unassigned"
                                     assign_opts = ["Unassigned"] + all_users
-                                    def_idx = assign_opts.index(curr_assign) if curr_assign in assign_opts else 0
+                                    try:
+                                        def_idx = assign_opts.index(curr_assign)
+                                    except:
+                                        def_idx = 0
                                     new_assign_sel = c9.selectbox("Reassign To", assign_opts, index=def_idx)
                                     new_assign = new_assign_sel if new_assign_sel != "Unassigned" else None
                                 else:
@@ -469,7 +523,7 @@ def main():
                                 # Buttons
                                 b1, b2 = st.columns(2)
                                 if b1.form_submit_button("💾 Save Changes"):
-                                    if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, new_coord, new_proj, is_manager):
+                                    if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, new_subject, new_coord_final, new_proj_final, is_manager):
                                         st.toast("✅ Task Updated Successfully!")
                                         time.sleep(0.5)
                                         st.rerun()
