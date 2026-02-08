@@ -24,10 +24,10 @@ st.markdown("""
     section[data-testid="stSidebar"] .block-container { padding-top: 2rem; }
     
     /* Custom Scrollbar for the Task Container */
-    div[data-testid="stVerticalBlockBorderWrapper"] > div > div > div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar {
+    div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar {
         width: 8px;
     }
-    div[data-testid="stVerticalBlockBorderWrapper"] > div > div > div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar-thumb {
+    div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar-thumb {
         background-color: #ccc;
         border-radius: 4px;
     }
@@ -250,7 +250,7 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # Dashboard is the main view now
+            # DASHBOARD IS THE MAIN VIEW
             menu_options = ["Dashboard"] 
             menu_icons = ["journal-bookmark"]
             
@@ -319,15 +319,15 @@ def main():
                             toggle_user_status(u['email'], u['status']); st.rerun()
             else: st.info("No users found.")
 
-        # --- DASHBOARD VIEW ---
+        # --- DASHBOARD VIEW (MAIN) ---
         elif nav_mode == "Dashboard":
-            # --- 1. NEW TASK SECTION ---
+            # --- 1. NEW TASK SECTION (Collapsible & Auto-Clearing) ---
             with st.expander("➕ Create New Task", expanded=False):
                 with st.form("quick_add_task", clear_on_submit=True):
                     # Description
                     st.text_input("Task Description", placeholder="What needs to be done?", key="new_desc")
                     
-                    # Row 2: Project & Coordinator with Toggles
+                    # Row 2: Project & Coordinator with CHECKBOX Toggle
                     c2, c3 = st.columns(2)
                     
                     with c2:
@@ -338,7 +338,7 @@ def main():
                         # Layout for Toggle
                         cp1, cp2 = st.columns([3, 1])
                         with cp2: 
-                            is_new_p = st.checkbox("New?", key="n_p_chk")
+                            is_new_p = st.checkbox("New?", key="n_p_chk", help="Check to type a new Project")
                         with cp1:
                             if is_new_p: selected_project = st.text_input("New Project Name", key="n_p_txt")
                             else: selected_project = st.selectbox("Project", all_projects, key="n_p_sel")
@@ -351,10 +351,10 @@ def main():
                         # Layout for Toggle
                         cc1, cc2 = st.columns([3, 1])
                         with cc2: 
-                            is_new_c = st.checkbox("New?", key="n_c_chk")
+                            is_new_c = st.checkbox("New?", key="n_c_chk", help="Check to type a new Coordinator")
                         with cc1:
                             if is_new_c: final_coordinator = st.text_input("New Coordinator", key="n_c_txt")
-                            else: final_coordinator = st.selectbox("Coordinator", all_coords, key="n_c_sel")
+                            else: final_coordinator = st.selectbox("Point Coordinator", all_coords, key="n_c_sel")
 
                     # Row 3: Meta
                     c4, c5 = st.columns(2)
@@ -374,16 +374,20 @@ def main():
                     with c9:
                         st.write("") # Spacer
                         st.write("") # Spacer
-                        submitted = st.form_submit_button("🚀 Add Task", type="primary")
+                        # Form submit button
+                        submitted = st.form_submit_button("🚀 Add Task", type="primary", use_container_width=True)
                     
                     if submitted:
-                        if st.session_state.new_desc: # Access via key ensures data presence
+                        if st.session_state.new_desc:
+                            # Logic to pick correct value based on toggle state
                             proj_save = selected_project if selected_project else "General"
                             coord_save = final_coordinator if final_coordinator else "General"
                             
-                            # Fast Save (Optimistic UI feeling)
+                            # Fast Save
                             add_task(current_user, final_assign, st.session_state.new_desc, prio, due, proj_save, coord_save, email_subj, points)
-                            st.toast("✅ Task Saved!")
+                            st.toast("✅ Task Added Successfully!")
+                            # No rerun needed because clear_on_submit handles the form, but rerun updates the list below
+                            time.sleep(0.5)
                             st.rerun()
                         else:
                             st.warning("Description required.")
@@ -516,6 +520,7 @@ def main():
 
                                     b1, b2 = st.columns(2)
                                     if b1.form_submit_button("💾 Save Changes"):
+                                        # Use fallback if user checked "New" but left empty
                                         final_c = new_coord if new_coord else curr_coord
                                         final_p = new_proj if new_proj else curr_proj
                                         
