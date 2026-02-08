@@ -24,10 +24,10 @@ st.markdown("""
     section[data-testid="stSidebar"] .block-container { padding-top: 2rem; }
     
     /* Custom Scrollbar for the Task Container */
-    div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar {
+    div[data-testid="stVerticalBlockBorderWrapper"] > div > div > div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar {
         width: 8px;
     }
-    div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar-thumb {
+    div[data-testid="stVerticalBlockBorderWrapper"] > div > div > div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar-thumb {
         background-color: #ccc;
         border-radius: 4px;
     }
@@ -249,7 +249,7 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # --- DASHBOARD IS THE MAIN VIEW (New Task Removed from Sidebar) ---
+            # --- MENU ---
             menu_options = ["Dashboard"] 
             menu_icons = ["journal-bookmark"]
             
@@ -320,12 +320,14 @@ def main():
 
         # --- DASHBOARD VIEW (MAIN) ---
         elif nav_mode == "Dashboard":
-            # --- 1. NEW TASK SECTION (Collapsible & Auto-Clearing) ---
-            with st.expander("➕ Create New Task", expanded=False):
-                # Toggles for New Project/Coordinator - Outside form to update UI
+            # --- 1. NEW TASK SECTION ---
+            # Expanded by default so it's always visible at the top
+            with st.expander("➕ Create New Task", expanded=True):
+                
+                # --- Toggles to Switch Inputs (Outside Form) ---
                 col_t1, col_t2 = st.columns(2)
-                with col_t1: is_new_proj = st.toggle("Type New Project?", key="tog_p")
-                with col_t2: is_new_coord = st.toggle("Type New Coordinator?", key="tog_c")
+                with col_t1: is_new_proj = st.checkbox("➕ New Project?", key="tog_p")
+                with col_t2: is_new_coord = st.checkbox("➕ New Coordinator?", key="tog_c")
 
                 with st.form("quick_add_task", clear_on_submit=True):
                     # Description
@@ -336,21 +338,21 @@ def main():
                     
                     with c2:
                         if is_new_proj:
-                            selected_project = st.text_input("New Project Name", key="n_p_txt")
+                            selected_project = st.text_input("Type Project Name", key="n_p_txt")
                         else:
                             synced_projects = get_projects()
                             used_projects = get_unique_column_values("project_ref")
                             all_projects = sorted(list(set(synced_projects + used_projects + ["General"])))
-                            selected_project = st.selectbox("Project", all_projects, key="n_p_sel")
+                            selected_project = st.selectbox("Select Project", all_projects, key="n_p_sel")
 
                     with c3:
                         if is_new_coord:
-                            final_coordinator = st.text_input("New Coordinator", key="n_c_txt")
+                            final_coordinator = st.text_input("Type Coordinator Name", key="n_c_txt")
                         else:
                             existing_coords = get_unique_column_values("coordinator")
                             base_coords = ["Sales Team", "Client", "Support Team", "Internal", "Management"]
                             all_coords = sorted(list(set(base_coords + existing_coords)))
-                            final_coordinator = st.selectbox("Point Coordinator", all_coords, key="n_c_sel")
+                            final_coordinator = st.selectbox("Select Point Coordinator", all_coords, key="n_c_sel")
 
                     # Row 3: Meta
                     c4, c5 = st.columns(2)
@@ -381,7 +383,7 @@ def main():
                             
                             # Fast Save
                             if add_task(current_user, final_assign, st.session_state.new_desc, prio, due, proj_save, coord_save, email_subj, points):
-                                st.toast("✅ Task Added!")
+                                st.toast("✅ Task Added Successfully!")
                                 time.sleep(0.5)
                                 st.rerun()
                         else:
@@ -515,7 +517,6 @@ def main():
 
                                     b1, b2 = st.columns(2)
                                     if b1.form_submit_button("💾 Save Changes"):
-                                        # Use fallback if user checked "New" but left empty
                                         final_c = new_coord if new_coord else curr_coord
                                         final_p = new_proj if new_proj else curr_proj
                                         
