@@ -148,7 +148,7 @@ def get_projects_master():
 def load_data_efficiently(target_email=None):
     """
     Fetches Tasks AND calculates Unique lists in ONE go.
-    Replaces 3-4 separate DB calls with 1.
+    Handles Data Cleaning for Dates to prevent crashes.
     """
     # 1. Fetch Tasks (Sorted by Date in DB for speed)
     query = supabase.table("tasks").select("*").order("due_date", desc=False)
@@ -157,8 +157,14 @@ def load_data_efficiently(target_email=None):
     response = query.execute()
     df = pd.DataFrame(response.data) if response.data else pd.DataFrame()
 
-    # 2. Extract Unique Values from memory (No extra DB calls!)
+    # --- CRITICAL FIX: DATE HANDLING ---
     if not df.empty:
+        # Force conversion to datetime, turning errors into NaT (Not a Time)
+        df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
+        # Fill missing dates with Today to prevent 'NaTType' errors later
+        df['due_date'] = df['due_date'].fillna(pd.Timestamp.now().normalize())
+
+        # 2. Extract Unique Values from memory
         used_coords = df['coordinator'].dropna().unique().tolist()
         used_projs = df['project_ref'].dropna().unique().tolist()
     else:
@@ -174,17 +180,6 @@ def load_data_efficiently(target_email=None):
     all_coords = sorted(list(set(base_coords + used_coords)))
 
     return df, all_projects, all_coords
-
-# --- HELPER: GET UNIQUE VALUES (Kept for Edit Mode individual checks) ---
-def get_unique_column_values(column_name):
-    try:
-        response = supabase.table("tasks").select(column_name).execute()
-        if response.data:
-            vals = list(set([row[column_name] for row in response.data if row[column_name]]))
-            vals.sort()
-            return vals
-        return []
-    except: return []
 
 # --- TASK FUNCTIONS ---
 def add_task(created_by, assigned_to, task_desc, priority, due_date, project_ref, coordinator, email_subject, points):
@@ -307,7 +302,6 @@ def main():
             st.markdown("**🤖 Assistant**")
             if st.button("Generate Briefing", use_container_width=True):
                 with st.spinner("Analyzing..."):
-                    # Use specialized small query for speed
                     q_ai = supabase.table("tasks").select("*").eq("assigned_to", current_user) if not is_manager else supabase.table("tasks").select("*")
                     resp_ai = q_ai.execute()
                     df_ai = pd.DataFrame(resp_ai.data) if resp_ai.data else pd.DataFrame()
@@ -360,32 +354,24 @@ def main():
         elif nav_mode == "New Task":
             st.header("✨ Create New Task")
             
-            # Use Efficient Loading Here Too
+            # Efficient Load
             _, all_projects, all_coords = load_data_efficiently(None) 
             
+            # Toggles OUTSIDE form
+            col_t1, col_t2 = st.columns(2)
+            with col_t1: is_new_proj = st.checkbox("➕ New Project?", key="tog_p_page")
+            with col_t2: is_new_coord = st.checkbox("➕ New Coordinator?", key="tog_c_page")
+
             with st.form("new_task_page_form", clear_on_submit=True):
                 st.text_input("Task Description", placeholder="What needs to be done?", key="nt_desc")
                 
                 c2, c3 = st.columns(2)
                 with c2:
-                    # Toggle Inside Column
-                    c2a, c2b = st.columns([3, 1])
-                    with c2b: 
-                        st.write("") # Spacer
-                        is_new_proj = st.checkbox("New", key="tog_p_page")
-                    with c2a:
-                        if is_new_proj: selected_project = st.text_input("Type Project Name", key="nt_p_txt")
-                        else: selected_project = st.selectbox("Project", all_projects, key="nt_p_sel")
-                
+                    if is_new_proj: selected_project = st.text_input("Type Project Name", key="nt_p_txt")
+                    else: selected_project = st.selectbox("Project", all_projects, key="nt_p_sel")
                 with c3:
-                    # Toggle Inside Column
-                    c3a, c3b = st.columns([3, 1])
-                    with c3b: 
-                        st.write("") # Spacer
-                        is_new_coord = st.checkbox("New", key="tog_c_page")
-                    with c3a:
-                        if is_new_coord: final_coordinator = st.text_input("Type Coordinator Name", key="nt_c_txt")
-                        else: final_coordinator = st.selectbox("Point Coordinator", all_coords, key="nt_c_sel")
+                    if is_new_coord: final_coordinator = st.text_input("Type Coordinator Name", key="nt_c_txt")
+                    else: final_coordinator = st.selectbox("Point Coordinator", all_coords, key="nt_c_sel")
 
                 c4, c5 = st.columns(2)
                 with c4: email_subj = st.text_input("Email Subject", placeholder="Optional", key="nt_sub")
@@ -409,7 +395,7 @@ def main():
                         coord_save = final_coordinator if final_coordinator else "General"
                         if add_task(current_user, final_assign, st.session_state.nt_desc, prio, due, proj_save, coord_save, email_subj, points):
                             st.toast("✅ Task Added Successfully!")
-                            time.sleep(0.01)
+                            time.sleep(0.1)
                     else:
                         st.warning("Description required.")
 
@@ -429,34 +415,26 @@ def main():
                 st.title("📔 My Diary")
                 view_email = current_user
             
-            # --- SUPER FAST ONE-TIME LOAD ---
+            # --- SUPER FAST ONE-TIME LOAD + CLEANING ---
             df, all_projects, all_coords = load_data_efficiently(view_email)
 
-            # --- 2. NEW TASK EXPANDER (Collapsed Button) ---
+            # --- 2. NEW TASK EXPANDER ---
             with st.expander("➕ Create New Task", expanded=False):
+                col_t1, col_t2 = st.columns(2)
+                with col_t1: is_new_proj_d = st.checkbox("➕ New Project?", key="tog_pd")
+                with col_t2: is_new_coord_d = st.checkbox("➕ New Coordinator?", key="tog_cd")
+
                 with st.form("dash_quick_add", clear_on_submit=True):
                     st.text_input("Task Description", placeholder="What needs to be done?", key="d_desc")
                     
                     c2, c3 = st.columns(2)
                     with c2:
-                        # Toggle Inside Column
-                        c2a, c2b = st.columns([3, 1])
-                        with c2b: 
-                            st.write("") 
-                            is_new_proj_d = st.checkbox("New", key="tog_pd")
-                        with c2a:
-                            if is_new_proj_d: selected_project = st.text_input("Type Project Name", key="d_p_txt")
-                            else: selected_project = st.selectbox("Project", all_projects, key="d_p_sel")
+                        if is_new_proj_d: selected_project = st.text_input("Type Project Name", key="d_p_txt")
+                        else: selected_project = st.selectbox("Project", all_projects, key="d_p_sel")
 
                     with c3:
-                        # Toggle Inside Column
-                        c3a, c3b = st.columns([3, 1])
-                        with c3b: 
-                            st.write("") 
-                            is_new_coord_d = st.checkbox("New", key="tog_cd")
-                        with c3a:
-                            if is_new_coord_d: final_coordinator = st.text_input("Type Coordinator Name", key="d_c_txt")
-                            else: final_coordinator = st.selectbox("Point Coordinator", all_coords, key="d_c_sel")
+                        if is_new_coord_d: final_coordinator = st.text_input("Type Coordinator Name", key="d_c_txt")
+                        else: final_coordinator = st.selectbox("Point Coordinator", all_coords, key="d_c_sel")
 
                     c4, c5 = st.columns(2)
                     with c4: email_subj = st.text_input("Email Subject", placeholder="Optional", key="d_sub")
@@ -482,14 +460,14 @@ def main():
                             coord_save = final_coordinator if final_coordinator else "General"
                             if add_task(current_user, final_assign, st.session_state.d_desc, prio, due, proj_save, coord_save, email_subj, points):
                                 st.toast("✅ Added!")
-                                time.sleep(0.01) # Minimized sleep
+                                time.sleep(0.01)
                                 st.rerun()
                         else:
                             st.warning("Desc required.")
 
             # --- 3. TASK LIST RENDER ---
             if not df.empty:
-                df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
+                # Dates are already cleaned in load_data_efficiently, but just to be safe for display logic
                 today_ts = pd.Timestamp.now().normalize()
                 active_df = df[df['status'] != 'Completed'].copy()
                 
@@ -519,7 +497,12 @@ def main():
                     # SCROLLABLE CONTAINER
                     with st.container(height=600):
                         for index, row in filtered.iterrows():
-                            d_str = row['due_date'].strftime('%d-%b')
+                            # Safe date formatting
+                            try:
+                                d_str = row['due_date'].strftime('%d-%b')
+                            except:
+                                d_str = "No Date"
+                                
                             proj = row.get('project_ref', 'General')
                             priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
                             assign_display = row['assigned_to'] if row['assigned_to'] else "Unassigned"
