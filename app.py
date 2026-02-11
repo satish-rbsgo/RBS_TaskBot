@@ -212,26 +212,32 @@ def main():
     if 'user_role' not in st.session_state: st.session_state['user_role'] = None
     if 'user_name' not in st.session_state: st.session_state['user_name'] = None
 
+    # --- FIX: LOGIN PLACEHOLDER (Prevents Ghosting) ---
+    login_placeholder = st.empty()
+
     if not st.session_state['logged_in']:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.title("🚀 RBS TaskHub")
-            with st.container(border=True):
-                email_input = st.text_input("Enter Work Email:")
-                if st.button("Login", use_container_width=True):
-                    email = email_input.lower().strip()
-                    if email.endswith(COMPANY_DOMAIN):
-                        user_record = verify_user_in_db(email)
-                        if user_record:
-                            st.session_state['logged_in'] = True
-                            st.session_state['user'] = user_record['email']
-                            st.session_state['user_role'] = user_record['role'] 
-                            st.session_state['user_name'] = user_record['name']
-                            st.rerun()
-                        else: st.error("🚫 Access Denied.")
-                    else: st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
+        with login_placeholder.container():
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.title("🚀 RBS TaskHub")
+                with st.container(border=True):
+                    email_input = st.text_input("Enter Work Email:")
+                    if st.button("Login", use_container_width=True):
+                        email = email_input.lower().strip()
+                        if email.endswith(COMPANY_DOMAIN):
+                            user_record = verify_user_in_db(email)
+                            if user_record:
+                                st.session_state['logged_in'] = True
+                                st.session_state['user'] = user_record['email']
+                                st.session_state['user_role'] = user_record['role'] 
+                                st.session_state['user_name'] = user_record['name']
+                                login_placeholder.empty() # Clear UI instantly
+                                st.rerun()
+                            else: st.error("🚫 Access Denied.")
+                        else: st.error(f"🚫 Restricted Access. {COMPANY_DOMAIN} only.")
     
     else:
+        # --- DASHBOARD LOGIC START ---
         current_user = st.session_state['user']
         user_role = st.session_state['user_role']
         user_name = st.session_state['user_name']
@@ -349,7 +355,6 @@ def main():
             with c7: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"], key="nt_pri")
             with c8: due = st.date_input("Due Date", value=date.today(), key="nt_due")
 
-            # Simple Button instead of Form Submit to allow dynamic UI updates
             if st.button("🚀 Add Task", type="primary", use_container_width=True):
                 if task_desc:
                     proj_save = selected_project if selected_project else "General"
@@ -380,7 +385,7 @@ def main():
                 d_desc = st.text_input("Task Description", placeholder="What needs to be done?", key="d_desc")
                 
                 c2, c3 = st.columns(2)
-                # Dashboard Project
+                # Dashboard Project - Side by Side
                 with c2:
                     p_inp, p_chk = st.columns([4, 1])
                     with p_chk:
@@ -389,7 +394,7 @@ def main():
                         if is_new_proj_d: selected_project = st.text_input("Project", key="d_p_txt")
                         else: selected_project = st.selectbox("Project", all_projects, key="d_p_sel")
                 
-                # Dashboard Coordinator
+                # Dashboard Coordinator - Side by Side
                 with c3:
                     c_inp, c_chk = st.columns([4, 1])
                     with c_chk:
@@ -412,6 +417,7 @@ def main():
                 with c7: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"], key="d_pri")
                 with c8: due = st.date_input("Due Date", value=date.today(), key="d_due")
                 
+                # Simple Button triggers rerun
                 if st.button("🚀 Add", type="primary", use_container_width=True, key="d_add_btn"):
                     if d_desc:
                         proj_save = selected_project if selected_project else "General"
@@ -467,29 +473,33 @@ def main():
 
                                     # COMPACT ROW 2
                                     c4, c5, c6 = st.columns([3, 3, 3])
-                                    # Project
+                                    # Project - Edit with Toggle
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     with c4:
                                         p_inp_col, p_chk_col = st.columns([5, 1])
-                                        is_new_p = p_chk_col.checkbox("Nw", key=f"np_{row['id']}")
-                                        if is_new_p: new_proj = p_inp_col.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
-                                        else: 
-                                            try: px = edit_projs.index(curr_proj)
-                                            except: px = 0
-                                            new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
+                                        with p_chk_col:
+                                            is_new_p = st.checkbox("Nw", key=f"np_{row['id']}")
+                                        with p_inp_col:
+                                            if is_new_p: new_proj = st.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
+                                            else: 
+                                                try: px = edit_projs.index(curr_proj)
+                                                except: px = 0
+                                                new_proj = st.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
                                     
-                                    # Coord
+                                    # Coord - Edit with Toggle
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     with c5:
                                         c_inp_col, c_chk_col = st.columns([5, 1])
-                                        is_new_c = c_chk_col.checkbox("Nw", key=f"nc_{row['id']}")
-                                        if is_new_c: new_coord = c_inp_col.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
-                                        else:
-                                            try: cx = edit_coords.index(curr_coord)
-                                            except: cx = 0
-                                            new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
+                                        with c_chk_col:
+                                            is_new_c = st.checkbox("Nw", key=f"nc_{row['id']}")
+                                        with c_inp_col:
+                                            if is_new_c: new_coord = st.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
+                                            else:
+                                                try: cx = edit_coords.index(curr_coord)
+                                                except: cx = 0
+                                                new_coord = st.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
 
                                     # Assignee
                                     if is_manager:
