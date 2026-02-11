@@ -137,7 +137,7 @@ def sync_projects():
     except Exception as e:
         return False, f"❌ Sync Error: {str(e)}"
 
-# --- OPTIMIZED DATA LOADING (THE SPEED FIX) ---
+# --- OPTIMIZED DATA LOADING ---
 @st.cache_data(ttl=300) # Cache project list for 5 mins
 def get_projects_master():
     try:
@@ -148,7 +148,6 @@ def get_projects_master():
 def load_data_efficiently(target_email=None):
     """
     Fetches Tasks AND calculates Unique lists in ONE go.
-    Handles Data Cleaning for Dates to prevent crashes.
     """
     # 1. Fetch Tasks (Sorted by Date in DB for speed)
     query = supabase.table("tasks").select("*").order("due_date", desc=False)
@@ -161,7 +160,7 @@ def load_data_efficiently(target_email=None):
     if not df.empty:
         # Force conversion to datetime, turning errors into NaT (Not a Time)
         df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
-        # Fill missing dates with Today to prevent 'NaTType' errors later
+        # Fill missing dates with Today
         df['due_date'] = df['due_date'].fillna(pd.Timestamp.now().normalize())
 
         # 2. Extract Unique Values from memory
@@ -302,6 +301,7 @@ def main():
             st.markdown("**🤖 Assistant**")
             if st.button("Generate Briefing", use_container_width=True):
                 with st.spinner("Analyzing..."):
+                    # Use specialized small query for speed
                     q_ai = supabase.table("tasks").select("*").eq("assigned_to", current_user) if not is_manager else supabase.table("tasks").select("*")
                     resp_ai = q_ai.execute()
                     df_ai = pd.DataFrame(resp_ai.data) if resp_ai.data else pd.DataFrame()
@@ -420,6 +420,7 @@ def main():
 
             # --- 2. NEW TASK EXPANDER ---
             with st.expander("➕ Create New Task", expanded=False):
+                # Toggles OUTSIDE form
                 col_t1, col_t2 = st.columns(2)
                 with col_t1: is_new_proj_d = st.checkbox("➕ New Project?", key="tog_pd")
                 with col_t2: is_new_coord_d = st.checkbox("➕ New Coordinator?", key="tog_cd")
@@ -467,56 +468,73 @@ def main():
 
             # --- 3. TASK LIST RENDER ---
             if not df.empty:
-                # Dates are already cleaned in load_data_efficiently, but just to be safe for display logic
+                # Dates are cleaned in load function
                 today_ts = pd.Timestamp.now().normalize()
+                
+                # Active vs Completed split
                 active_df = df[df['status'] != 'Completed'].copy()
+                completed_df = df[df['status'] == 'Completed'].copy()
                 
                 c_all = len(active_df)
                 c_today = len(active_df[active_df['due_date'] == today_ts])
                 c_tmrw = len(active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)])
                 c_over = len(active_df[active_df['due_date'] < today_ts])
+                c_done = len(completed_df)
                 
                 selected_filter = option_menu(
                     menu_title=None,
-                    options=[f"All Pending ({c_all})", f"Today ({c_today})", f"Tomorrow ({c_tmrw})", f"Overdue ({c_over})"],
-                    icons=["folder", "lightning", "calendar", "exclamation-triangle"],
+                    options=[f"Pending ({c_all})", f"Today ({c_today})", f"Tomorrow ({c_tmrw})", f"Overdue ({c_over})", f"Completed ({c_done})"],
+                    icons=["folder", "lightning", "calendar", "exclamation-triangle", "check-circle"],
                     orientation="horizontal",
                     styles={"container": {"padding": "0!important", "background-color": "#fafafa"}}
                 )
                 
-                if "Today" in selected_filter: filtered = active_df[active_df['due_date'] == today_ts]
-                elif "Tomorrow" in selected_filter: filtered = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
-                elif "Overdue" in selected_filter: filtered = active_df[active_df['due_date'] < today_ts]
-                else: filtered = active_df
+                # Logic for filtering
+                final_view_df = pd.DataFrame()
+                
+                if "Completed" in selected_filter:
+                    final_view_df = completed_df
+                else:
+                    if "Today" in selected_filter: final_view_df = active_df[active_df['due_date'] == today_ts]
+                    elif "Tomorrow" in selected_filter: final_view_df = active_df[active_df['due_date'] == today_ts + pd.Timedelta(days=1)]
+                    elif "Overdue" in selected_filter: final_view_df = active_df[active_df['due_date'] < today_ts]
+                    else: final_view_df = active_df
                 
                 st.write("")
                 
-                if filtered.empty: 
+                if final_view_df.empty: 
                     st.info(f"✅ No tasks found for '{selected_filter}'.")
                 else:
                     # SCROLLABLE CONTAINER
                     with st.container(height=600):
-                        for index, row in filtered.iterrows():
-                            # Safe date formatting
+                        for index, row in final_view_df.iterrows():
                             try:
                                 d_str = row['due_date'].strftime('%d-%b')
                             except:
                                 d_str = "No Date"
                                 
                             proj = row.get('project_ref', 'General')
-                            priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
+                            
+                            if "Completed" in selected_filter:
+                                priority_icon = "🟢"
+                            else:
+                                priority_icon = "🔴" if "High" in row['priority'] else "🟡" if "Medium" in row['priority'] else "🔵"
+                            
                             assign_display = row['assigned_to'] if row['assigned_to'] else "Unassigned"
                             assign_label = f" ➝ {assign_display.split('@')[0].title()}" if (is_manager) else ""
                             
+                            # --- EXPANDER ---
                             with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
                                 
                                 with st.form(key=f"edit_{row['id']}"):
+                                    # ... (Standard Edit Fields) ...
                                     e1, e2 = st.columns([2, 1])
                                     new_desc = e1.text_input("Desc", value=row['task_desc'])
+                                    # Remarks field
                                     new_rem = e2.text_input("Rem", value=row['staff_remarks'] if row['staff_remarks'] else "")
                                     
+                                    # ... (Project/Coord Logic Same as Before) ...
                                     e3, e4 = st.columns(2)
-                                    # Edit Project + Toggle
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     ep1, ep2 = e3.columns([3,1])
@@ -530,7 +548,6 @@ def main():
                                             except: p_idx = 0
                                             new_proj = st.selectbox("Project", edit_projs, index=p_idx, key=f"sp_{row['id']}")
 
-                                    # Edit Coord + Toggle
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     ec1, ec2 = e4.columns([3,1])
@@ -543,21 +560,41 @@ def main():
                                             try: c_idx = edit_coords.index(curr_coord)
                                             except: c_idx = 0
                                             new_coord = st.selectbox("Coord", edit_coords, index=c_idx, key=f"sc_{row['id']}")
-
+                                    
+                                    # Points
                                     curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
                                     new_points = st.text_area("Points", value=curr_pts, height=80)
-
-                                    b1, b2 = st.columns(2)
-                                    if b1.form_submit_button("💾 Save"):
+                                    
+                                    # Standard Save Button
+                                    if st.form_submit_button("💾 Save Changes"):
                                         final_c = new_coord if new_coord else curr_coord
                                         final_p = new_proj if new_proj else curr_proj
                                         if update_task_full(row['id'], new_desc, row['due_date'], row['priority'], new_rem, row['assigned_to'], new_points, row['email_subject'], final_c, final_p, is_manager):
                                             st.toast("Updated!")
                                             time.sleep(0.01)
                                             st.rerun()
-                                    
-                                    if b2.form_submit_button("✅ Done"):
-                                        update_task_status(row['id'], "Completed", new_rem)
+
+                                # --- SEPERATE ACTION AREA FOR COMPLETION ---
+                                if "Completed" not in selected_filter:
+                                    st.divider()
+                                    st.caption("✅ **Close Task**")
+                                    with st.form(key=f"close_{row['id']}"):
+                                        close_remarks = st.text_input("Closing Remarks (Required)", placeholder="E.g., Done, Tested ok...")
+                                        if st.form_submit_button("Mark as Completed", type="primary"):
+                                            if close_remarks:
+                                                update_task_status(row['id'], "Completed", close_remarks)
+                                                st.toast("Task Closed!")
+                                                time.sleep(0.1)
+                                                st.rerun()
+                                            else:
+                                                st.warning("Please enter closing remarks.")
+                                else:
+                                    # Re-open Logic
+                                    st.divider()
+                                    if st.button("🔄 Reinstate to Pending", key=f"reopen_{row['id']}"):
+                                        update_task_status(row['id'], "Open", row['staff_remarks'])
+                                        st.toast("Task Re-opened!")
+                                        time.sleep(0.1)
                                         st.rerun()
 
             else: st.info("👋 No active tasks found.")
