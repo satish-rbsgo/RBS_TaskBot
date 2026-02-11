@@ -34,8 +34,8 @@ st.markdown("""
     div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar { width: 6px; }
     div[data-testid="stVerticalBlock"] > div[style*="overflow"]::-webkit-scrollbar-thumb { background-color: #ccc; border-radius: 3px; }
     
-    /* Better Checkbox Alignment */
-    .stCheckbox { margin-top: 30px; }
+    /* Vertical Align Checkbox with Input */
+    div[data-testid="stCheckbox"] { margin-top: 28px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -314,20 +314,28 @@ def main():
             st.header("✨ Create New Task")
             _, all_projects, all_coords = load_data_efficiently(None) 
             
-            # --- Toggles ABOVE the Form to set state ---
-            c_top1, c_top2 = st.columns(2)
-            with c_top1: is_new_proj_page = st.checkbox("➕ Type New Project?", key="page_proj_tog")
-            with c_top2: is_new_coord_page = st.checkbox("➕ Type New Coordinator?", key="page_coord_tog")
-
             with st.form("new_task_page_form", clear_on_submit=True):
                 st.text_input("Task Description", placeholder="What needs to be done?", key="nt_desc")
+                
+                # Side-by-Side Layout: Project
                 c2, c3 = st.columns(2)
                 with c2:
-                    if is_new_proj_page: selected_project = st.text_input("Project Name", key="nt_p_txt")
-                    else: selected_project = st.selectbox("Project", all_projects, key="nt_p_sel")
+                    p_inp, p_chk = st.columns([4, 1])
+                    with p_chk:
+                        is_new_proj = st.checkbox("New", key="nt_p_chk")
+                    with p_inp:
+                        if is_new_proj: selected_project = st.text_input("Project", key="nt_p_txt")
+                        else: selected_project = st.selectbox("Project", all_projects, key="nt_p_sel")
+                
+                # Side-by-Side Layout: Coordinator
                 with c3:
-                    if is_new_coord_page: final_coordinator = st.text_input("Coordinator Name", key="nt_c_txt")
-                    else: final_coordinator = st.selectbox("Coordinator", all_coords, key="nt_c_sel")
+                    c_inp, c_chk = st.columns([4, 1])
+                    with c_chk:
+                        is_new_coord = st.checkbox("New", key="nt_c_chk")
+                    with c_inp:
+                        if is_new_coord: final_coordinator = st.text_input("Coordinator", key="nt_c_txt")
+                        else: final_coordinator = st.selectbox("Coordinator", all_coords, key="nt_c_sel")
+
                 c4, c5 = st.columns(2)
                 with c4: email_subj = st.text_input("Email Subject", placeholder="Optional", key="nt_sub")
                 with c5: points = st.text_area("Detailed Points", height=1, placeholder="One per line...", key="nt_pts")
@@ -366,31 +374,26 @@ def main():
 
             # --- 2. NEW TASK EXPANDER ---
             with st.expander("➕ Create New Task", expanded=False):
-                # --- LAYOUT FIX: Checkboxes INLINE with Dropdowns ---
                 with st.form("dash_quick_add", clear_on_submit=True):
                     st.text_input("Task Description", placeholder="What needs to be done?", key="d_desc")
                     
+                    # Side-by-Side Layout: Project
                     c2, c3 = st.columns(2)
                     with c2:
-                        # Split column for [Dropdown (80%)] and [Checkbox (20%)]
-                        c2a, c2b = st.columns([4, 1])
-                        with c2b: 
-                            # Adding top margin to align checkbox with dropdown
-                            st.write("") 
-                            st.write("") 
-                            is_new_proj_d = st.checkbox("New", key="dash_proj_tog")
-                        with c2a:
-                            if is_new_proj_d: selected_project = st.text_input("Project Name", key="d_p_txt")
+                        p_inp, p_chk = st.columns([4, 1])
+                        with p_chk:
+                            is_new_proj_d = st.checkbox("New", key="d_p_chk")
+                        with p_inp:
+                            if is_new_proj_d: selected_project = st.text_input("Project", key="d_p_txt")
                             else: selected_project = st.selectbox("Project", all_projects, key="d_p_sel")
                     
+                    # Side-by-Side Layout: Coordinator
                     with c3:
-                        c3a, c3b = st.columns([4, 1])
-                        with c3b: 
-                            st.write("") 
-                            st.write("") 
-                            is_new_coord_d = st.checkbox("New", key="dash_coord_tog")
-                        with c3a:
-                            if is_new_coord_d: final_coordinator = st.text_input("Coordinator Name", key="d_c_txt")
+                        c_inp, c_chk = st.columns([4, 1])
+                        with c_chk:
+                            is_new_coord_d = st.checkbox("New", key="d_c_chk")
+                        with c_inp:
+                            if is_new_coord_d: final_coordinator = st.text_input("Coordinator", key="d_c_txt")
                             else: final_coordinator = st.selectbox("Coordinator", all_coords, key="d_c_sel")
 
                     c4, c5 = st.columns(2)
@@ -463,25 +466,31 @@ def main():
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     with c4:
-                                        p_chk_col, p_inp_col = st.columns([1, 5])
-                                        is_new_p = p_chk_col.checkbox("Nw", key=f"np_{row['id']}")
-                                        if is_new_p: new_proj = p_inp_col.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
-                                        else: 
-                                            try: px = edit_projs.index(curr_proj)
-                                            except: px = 0
-                                            new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
+                                        p_inp_col, p_chk_col = st.columns([5, 1])
+                                        with p_chk_col:
+                                            st.write("")
+                                            is_new_p = st.checkbox("Nw", key=f"np_{row['id']}")
+                                        with p_inp_col:
+                                            if is_new_p: new_proj = st.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
+                                            else: 
+                                                try: px = edit_projs.index(curr_proj)
+                                                except: px = 0
+                                                new_proj = st.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
                                     
                                     # Coord
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     with c5:
-                                        c_chk_col, c_inp_col = st.columns([1, 5])
-                                        is_new_c = c_chk_col.checkbox("Nw", key=f"nc_{row['id']}")
-                                        if is_new_c: new_coord = c_inp_col.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
-                                        else:
-                                            try: cx = edit_coords.index(curr_coord)
-                                            except: cx = 0
-                                            new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
+                                        c_inp_col, c_chk_col = st.columns([5, 1])
+                                        with c_chk_col:
+                                            st.write("")
+                                            is_new_c = st.checkbox("Nw", key=f"nc_{row['id']}")
+                                        with c_inp_col:
+                                            if is_new_c: new_coord = st.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
+                                            else:
+                                                try: cx = edit_coords.index(curr_coord)
+                                                except: cx = 0
+                                                new_coord = st.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
 
                                     # Assignee
                                     if is_manager:
