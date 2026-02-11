@@ -355,6 +355,7 @@ def main():
             with c7: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"], key="nt_pri")
             with c8: due = st.date_input("Due Date", value=date.today(), key="nt_due")
 
+            # Simple Button instead of Form Submit to allow dynamic UI updates
             if st.button("🚀 Add Task", type="primary", use_container_width=True):
                 if task_desc:
                     proj_save = selected_project if selected_project else "General"
