@@ -35,6 +35,9 @@ st.markdown("""
         background-color: #ccc;
         border-radius: 4px;
     }
+    
+    /* Compact Form Spacing */
+    div[data-testid="column"] { padding-bottom: 0px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,7 +140,7 @@ def sync_projects():
     except Exception as e:
         return False, f"❌ Sync Error: {str(e)}"
 
-# --- OPTIMIZED DATA LOADING ---
+# --- OPTIMIZED DATA LOADING (THE SPEED FIX) ---
 @st.cache_data(ttl=300) # Cache project list for 5 mins
 def get_projects_master():
     try:
@@ -148,6 +151,7 @@ def get_projects_master():
 def load_data_efficiently(target_email=None):
     """
     Fetches Tasks AND calculates Unique lists in ONE go.
+    Handles Data Cleaning for Dates to prevent crashes.
     """
     # 1. Fetch Tasks (Sorted by Date in DB for speed)
     query = supabase.table("tasks").select("*").order("due_date", desc=False)
@@ -160,7 +164,7 @@ def load_data_efficiently(target_email=None):
     if not df.empty:
         # Force conversion to datetime, turning errors into NaT (Not a Time)
         df['due_date'] = pd.to_datetime(df['due_date'], errors='coerce')
-        # Fill missing dates with Today
+        # Fill missing dates with Today to prevent 'NaTType' errors later
         df['due_date'] = df['due_date'].fillna(pd.Timestamp.now().normalize())
 
         # 2. Extract Unique Values from memory
@@ -420,7 +424,6 @@ def main():
 
             # --- 2. NEW TASK EXPANDER ---
             with st.expander("➕ Create New Task", expanded=False):
-                # Toggles OUTSIDE form
                 col_t1, col_t2 = st.columns(2)
                 with col_t1: is_new_proj_d = st.checkbox("➕ New Project?", key="tog_pd")
                 with col_t2: is_new_coord_d = st.checkbox("➕ New Coordinator?", key="tog_cd")
@@ -523,79 +526,79 @@ def main():
                             assign_display = row['assigned_to'] if row['assigned_to'] else "Unassigned"
                             assign_label = f" ➝ {assign_display.split('@')[0].title()}" if (is_manager) else ""
                             
-                            # --- EXPANDER ---
+                            # --- COMPACT EXPANDER ---
                             with st.expander(f"{priority_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
                                 
                                 with st.form(key=f"edit_{row['id']}"):
-                                    # ... (Standard Edit Fields) ...
-                                    e1, e2 = st.columns([2, 1])
-                                    new_desc = e1.text_input("Desc", value=row['task_desc'])
-                                    # Remarks field
-                                    new_rem = e2.text_input("Rem", value=row['staff_remarks'] if row['staff_remarks'] else "")
+                                    # COMPACT LAYOUT - Using more horizontal space
+                                    r1_c1, r1_c2, r1_c3 = st.columns([3, 1, 1])
+                                    new_desc = r1_c1.text_input("Description", value=row['task_desc'])
+                                    new_rem = r1_c2.text_input("Remarks", value=row['staff_remarks'] if row['staff_remarks'] else "")
                                     
-                                    # ... (Project/Coord Logic Same as Before) ...
-                                    e3, e4 = st.columns(2)
-                                    curr_proj = row.get('project_ref', 'General')
-                                    edit_projs = sorted(list(set(all_projects + [curr_proj])))
-                                    ep1, ep2 = e3.columns([3,1])
-                                    with ep2: 
-                                        st.write("")
-                                        is_new_p_e = st.checkbox("New", key=f"np_{row['id']}")
-                                    with ep1:
-                                        if is_new_p_e: new_proj = st.text_input("Project", key=f"tp_{row['id']}")
+                                    # Date/Prio in same row as desc for compactness? No, better on Row 2
+                                    r2_c1, r2_c2, r2_c3 = st.columns([2, 2, 1])
+                                    
+                                    # Project
+                                    with r2_c1:
+                                        curr_proj = row.get('project_ref', 'General')
+                                        edit_projs = sorted(list(set(all_projects + [curr_proj])))
+                                        p_col, t_col = st.columns([4, 1])
+                                        is_new_p_e = t_col.checkbox("New", key=f"np_{row['id']}")
+                                        if is_new_p_e: new_proj = p_col.text_input("Project", key=f"tp_{row['id']}")
                                         else: 
                                             try: p_idx = edit_projs.index(curr_proj)
                                             except: p_idx = 0
-                                            new_proj = st.selectbox("Project", edit_projs, index=p_idx, key=f"sp_{row['id']}")
-
-                                    curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
-                                    edit_coords = sorted(list(set(all_coords + [curr_coord])))
-                                    ec1, ec2 = e4.columns([3,1])
-                                    with ec2:
-                                        st.write("")
-                                        is_new_c_e = st.checkbox("New", key=f"nc_{row['id']}")
-                                    with ec1:
-                                        if is_new_c_e: new_coord = st.text_input("Coord", key=f"tc_{row['id']}")
+                                            new_proj = p_col.selectbox("Project", edit_projs, index=p_idx, key=f"sp_{row['id']}")
+                                    
+                                    # Coordinator
+                                    with r2_c2:
+                                        curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
+                                        edit_coords = sorted(list(set(all_coords + [curr_coord])))
+                                        c_col, ct_col = st.columns([4, 1])
+                                        is_new_c_e = ct_col.checkbox("New", key=f"nc_{row['id']}")
+                                        if is_new_c_e: new_coord = c_col.text_input("Coord", key=f"tc_{row['id']}")
                                         else:
                                             try: c_idx = edit_coords.index(curr_coord)
                                             except: c_idx = 0
-                                            new_coord = st.selectbox("Coord", edit_coords, index=c_idx, key=f"sc_{row['id']}")
+                                            new_coord = c_col.selectbox("Coord", edit_coords, index=c_idx, key=f"sc_{row['id']}")
+                                            
+                                    r2_c3.caption("Metadata")
+                                    new_date = r2_c3.date_input("Due", value=row['due_date'], key=f"dd_{row['id']}")
                                     
-                                    # Points
+                                    # Details
                                     curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
-                                    new_points = st.text_area("Points", value=curr_pts, height=80)
+                                    new_points = st.text_area("Details", value=curr_pts, height=68, key=f"pts_{row['id']}")
                                     
-                                    # Standard Save Button
-                                    if st.form_submit_button("💾 Save Changes"):
+                                    # --- ACTION ROW: Save + Close Logic Combined ---
+                                    b1, b2, b3 = st.columns([1, 2, 1])
+                                    
+                                    # 1. SAVE BUTTON
+                                    if b1.form_submit_button("💾 Save Changes"):
                                         final_c = new_coord if new_coord else curr_coord
                                         final_p = new_proj if new_proj else curr_proj
-                                        if update_task_full(row['id'], new_desc, row['due_date'], row['priority'], new_rem, row['assigned_to'], new_points, row['email_subject'], final_c, final_p, is_manager):
+                                        if update_task_full(row['id'], new_desc, new_date, row['priority'], new_rem, row['assigned_to'], new_points, row['email_subject'], final_c, final_p, is_manager):
                                             st.toast("Updated!")
                                             time.sleep(0.01)
                                             st.rerun()
 
-                                # --- SEPERATE ACTION AREA FOR COMPLETION ---
-                                if "Completed" not in selected_filter:
-                                    st.divider()
-                                    st.caption("✅ **Close Task**")
-                                    with st.form(key=f"close_{row['id']}"):
-                                        close_remarks = st.text_input("Closing Remarks (Required)", placeholder="E.g., Done, Tested ok...")
-                                        if st.form_submit_button("Mark as Completed", type="primary"):
+                                    # 2. CLOSE TASK (Only if not completed)
+                                    if "Completed" not in selected_filter:
+                                        close_remarks = b2.text_input("Closing Remarks", placeholder="Required to close...", label_visibility="collapsed", key=f"cr_{row['id']}")
+                                        if b3.form_submit_button("✅ Mark Done", type="primary"):
                                             if close_remarks:
                                                 update_task_status(row['id'], "Completed", close_remarks)
-                                                st.toast("Task Closed!")
+                                                st.toast("Closed!")
                                                 time.sleep(0.1)
                                                 st.rerun()
                                             else:
-                                                st.warning("Please enter closing remarks.")
-                                else:
-                                    # Re-open Logic
-                                    st.divider()
-                                    if st.button("🔄 Reinstate to Pending", key=f"reopen_{row['id']}"):
-                                        update_task_status(row['id'], "Open", row['staff_remarks'])
-                                        st.toast("Task Re-opened!")
-                                        time.sleep(0.1)
-                                        st.rerun()
+                                                st.warning("Remark Req.")
+                                    else:
+                                        # REINSTATE (Only if completed)
+                                        if b3.form_submit_button("🔄 Re-Open"):
+                                            update_task_status(row['id'], "Open", row['staff_remarks'])
+                                            st.toast("Re-opened!")
+                                            time.sleep(0.1)
+                                            st.rerun()
 
             else: st.info("👋 No active tasks found.")
 
