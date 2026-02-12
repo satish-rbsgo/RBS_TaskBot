@@ -519,29 +519,41 @@ def main():
 
                                     # COMPACT ROW 2
                                     c4, c5, c6 = st.columns([3, 3, 3])
-                                    # Project - Edit with Toggle
+                                    # Project - Edit with optional NEW override
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     with c4:
                                         p_inp_col, p_chk_col = st.columns([5, 1])
-                                        is_new_p = p_chk_col.checkbox("Nw", key=f"np_{row['id']}")
-                                        if is_new_p: new_proj = p_inp_col.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
-                                        else: 
-                                            try: px = edit_projs.index(curr_proj)
-                                            except: px = 0
-                                            new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
+                                        use_new_p = p_chk_col.checkbox("Nw", key=f"np_{row['id']}")
+                                        try: px = edit_projs.index(curr_proj)
+                                        except: px = 0
+                                        sel_proj = p_inp_col.selectbox(
+                                            "Proj", edit_projs, index=px,
+                                            key=f"sp_{row['id']}", label_visibility="collapsed"
+                                        )
+                                        new_proj_text = p_inp_col.text_input(
+                                            "New Proj", key=f"tp_{row['id']}",
+                                            label_visibility="collapsed",
+                                            placeholder="New project (if any)..."
+                                        )
                                     
-                                    # Coord - Edit with Toggle
+                                    # Coord - Edit with optional NEW override
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     with c5:
                                         c_inp_col, c_chk_col = st.columns([5, 1])
-                                        is_new_c = c_chk_col.checkbox("Nw", key=f"nc_{row['id']}")
-                                        if is_new_c: new_coord = c_inp_col.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
-                                        else:
-                                            try: cx = edit_coords.index(curr_coord)
-                                            except: cx = 0
-                                            new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
+                                        use_new_c = c_chk_col.checkbox("Nw", key=f"nc_{row['id']}")
+                                        try: cx = edit_coords.index(curr_coord)
+                                        except: cx = 0
+                                        sel_coord = c_inp_col.selectbox(
+                                            "Coord", edit_coords, index=cx,
+                                            key=f"sc_{row['id']}", label_visibility="collapsed"
+                                        )
+                                        new_coord_text = c_inp_col.text_input(
+                                            "New Coord", key=f"tc_{row['id']}",
+                                            label_visibility="collapsed",
+                                            placeholder="New coordinator (if any)..."
+                                        )
 
                                     # Assignee
                                     if is_manager:
@@ -564,8 +576,18 @@ def main():
                                     # ACTIONS
                                     b1, b2, b3 = st.columns([1, 2, 1])
                                     if b1.form_submit_button("💾 Save"):
-                                        final_c = new_coord if new_coord else curr_coord
-                                        final_p = new_proj if new_proj else curr_proj
+                                        # Decide final Project based on NEW flag + input
+                                        use_new_p_state = st.session_state.get(f"np_{row['id']}", False)
+                                        proj_from_sel = st.session_state.get(f"sp_{row['id']}", curr_proj)
+                                        proj_from_txt = st.session_state.get(f"tp_{row['id']}", "").strip()
+                                        final_p = proj_from_txt if (use_new_p_state and proj_from_txt) else proj_from_sel
+
+                                        # Decide final Coordinator based on NEW flag + input
+                                        use_new_c_state = st.session_state.get(f"nc_{row['id']}", False)
+                                        coord_from_sel = st.session_state.get(f"sc_{row['id']}", curr_coord)
+                                        coord_from_txt = st.session_state.get(f"tc_{row['id']}", "").strip()
+                                        final_c = coord_from_txt if (use_new_c_state and coord_from_txt) else coord_from_sel
+
                                         if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, row['email_subject'], final_c, final_p, is_manager):
                                             st.toast("Saved!"); time.sleep(0.01); st.rerun()
 
