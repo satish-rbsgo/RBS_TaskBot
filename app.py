@@ -46,7 +46,7 @@ st.markdown("""
         display: block;
     }
     .alert-text-today {
-        color: #ef6c00;
+        color: #2e7d32; /* GREEN for NOW */
         font-weight: 800;
         font-size: 14px;
         margin-bottom: 5px;
@@ -492,10 +492,11 @@ def main():
                                 if is_overdue: 
                                     icon = "🔴"
                                     # Use Streamlit colored text feature for title
-                                    title_prefix = ":red[**[LATE]**] "
+                                    title_prefix = ":red[**[OVR]**] "
                                 elif is_today: 
                                     icon = "⚡"
-                                    title_prefix = ":orange[**[NOW]**] "
+                                    # GREEN FOR TODAY
+                                    title_prefix = ":green[**[NOW]**] "
                                 else: 
                                     icon = "🔵"
 
