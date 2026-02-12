@@ -273,8 +273,7 @@ def main():
             menu_options = ["Dashboard", "New Task"] 
             menu_icons = ["journal-bookmark", "plus-circle"]
             if is_manager:
-                menu_options.append("Sync Roadmap")
-                menu_icons.append("cloud-arrow-down")
+                # Only show Team Master for managers (Sync Roadmap removed)
                 menu_options.append("Team Master") 
                 menu_icons.append("people-fill")
 
@@ -291,15 +290,7 @@ def main():
             if st.button("Logout", use_container_width=True):
                 st.session_state['logged_in'] = False; st.rerun()
 
-        if nav_mode == "Sync Roadmap" and is_manager:
-            st.header("🔗 Google Sheets Sync")
-            if st.button("🚀 Pull Latest Roadmap", type="primary"):
-                with st.spinner("Syncing..."):
-                    success, msg = sync_projects()
-                    if success: st.success(msg)
-                    else: st.error(msg)
-
-        elif nav_mode == "Team Master" and is_manager:
+        if nav_mode == "Team Master" and is_manager:
             st.title("👥 Team Master")
             with st.expander("➕ Add New User", expanded=True):
                 with st.form("add_user", clear_on_submit=True):
