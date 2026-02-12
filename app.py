@@ -37,34 +37,38 @@ st.markdown("""
     /* Vertical Align Checkbox with Input */
     div[data-testid="stCheckbox"] { margin-top: 28px; }
 
-    /* --- BLINKING ANIMATION FOR DOTS --- */
-    @keyframes blink-opacity {
-        0% { opacity: 1; }
-        50% { opacity: 0.2; }
-        100% { opacity: 1; }
+    /* --- BLINKING CONTAINER ANIMATIONS --- */
+    @keyframes pulse-red {
+        0% { border-left: 5px solid #ff4b4b; background-color: rgba(255, 75, 75, 0.1); }
+        50% { border-left: 5px solid transparent; background-color: transparent; }
+        100% { border-left: 5px solid #ff4b4b; background-color: rgba(255, 75, 75, 0.1); }
     }
     
-    /* We can't style emojis directly in expander title easily, so we use a span in markdown body 
-       OR we just accept standard emojis. 
-       BUT user wants the DOT to blink. 
-       Streamlit expander titles treat HTML as text. 
-       So we revert to:
-       1. Standard Emoji in Title.
-       2. Blinking Warning INSIDE the expander (Top Line).
-       
-       Wait, the user asked for the *BUTTON/ICON* to blink.
-       If we can't blink the expander title icon, we can put a blinking icon *inside* the body.
-    */
-    
-    .blink-warning {
-        color: red;
-        font-weight: bold;
-        animation: blink-opacity 1s infinite;
+    @keyframes pulse-orange {
+        0% { border-left: 5px solid #ffa500; background-color: rgba(255, 165, 0, 0.1); }
+        50% { border-left: 5px solid transparent; background-color: transparent; }
+        100% { border-left: 5px solid #ffa500; background-color: rgba(255, 165, 0, 0.1); }
     }
-    .blink-today {
-        color: orange;
-        font-weight: bold;
-        animation: blink-opacity 1s infinite;
+
+    .blinking-container-red {
+        animation: pulse-red 1.5s infinite;
+        border-radius: 5px;
+        margin-bottom: 10px;
+        padding-right: 5px; /* Slight padding to prevent text cutoff */
+    }
+
+    .blinking-container-orange {
+        animation: pulse-orange 1.5s infinite;
+        border-radius: 5px;
+        margin-bottom: 10px;
+        padding-right: 5px;
+    }
+
+    /* Standard container spacing */
+    .normal-container {
+        margin-bottom: 10px;
+        border-left: 5px solid #f0f2f6; /* Grey static border for alignment */
+        padding-right: 5px;
     }
 
 </style>
@@ -389,6 +393,7 @@ def main():
             with c7: prio = st.selectbox("Priority", ["🔥 High", "⚡ Medium", "🧊 Low"], key="nt_pri")
             with c8: due = st.date_input("Due Date", value=date.today(), key="nt_due")
 
+            # Simple Button instead of Form Submit to allow dynamic UI updates
             if st.button("🚀 Add Task", type="primary", use_container_width=True):
                 if task_desc:
                     proj_save = selected_project if selected_project else "General"
@@ -498,7 +503,13 @@ def main():
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
-                            # Revert to standard Icon assignment
+                            # CSS Classes for wrapper
+                            container_class = "normal-container" # default
+                            if enable_blink and "Completed" not in selected_filter:
+                                if is_overdue: container_class = "blinking-container-red"
+                                elif is_today: container_class = "blinking-container-orange"
+
+                            # Icons
                             icon = "🔵"
                             if "Completed" in selected_filter:
                                 icon = "🟢"
@@ -510,14 +521,10 @@ def main():
                             assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
                             expander_title = f"{icon} {d_str} | {row['task_desc']} ({proj}){assign_label}"
                             
-                            # Standard Expander (No Wrapping Divs)
+                            # OPEN WRAPPER
+                            st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
+                            
                             with st.expander(expander_title):
-                                # INJECT BLINKING ALERT TEXT INSIDE
-                                if enable_blink and is_overdue and "Completed" not in selected_filter:
-                                     st.markdown(f'<div class="blink-warning">⚠️ OVERDUE TASK</div>', unsafe_allow_html=True)
-                                elif enable_blink and is_today and "Completed" not in selected_filter:
-                                     st.markdown(f'<div class="blink-today">⚡ DUE TODAY</div>', unsafe_allow_html=True)
-
                                 with st.form(key=f"edit_{row['id']}"):
                                     # COMPACT ROW 1
                                     c1, c2, c3 = st.columns([5, 2, 2])
@@ -528,7 +535,6 @@ def main():
 
                                     # COMPACT ROW 2
                                     c4, c5, c6 = st.columns([3, 3, 3])
-                                    # Project - Edit with Toggle
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     with c4:
@@ -540,7 +546,6 @@ def main():
                                             except: px = 0
                                             new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
                                     
-                                    # Coord - Edit with Toggle
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     with c5:
@@ -552,7 +557,6 @@ def main():
                                             except: cx = 0
                                             new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
 
-                                    # Assignee
                                     if is_manager:
                                         all_users_list = get_active_users()
                                         assign_opts = ["Unassigned"] + all_users_list
@@ -564,13 +568,11 @@ def main():
                                         new_assign = row['assigned_to']
                                         c6.text_input("Assign", value=new_assign, disabled=True, label_visibility="collapsed")
 
-                                    # COMPACT ROW 3
                                     curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
                                     new_rem = st.text_input("Remarks", value=curr_rem, placeholder="Updates...", label_visibility="collapsed")
                                     curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
                                     new_points = st.text_area("Details", value=curr_pts, height=68, label_visibility="collapsed", placeholder="Detailed Points...")
 
-                                    # ACTIONS
                                     b1, b2, b3 = st.columns([1, 2, 1])
                                     if b1.form_submit_button("💾 Save"):
                                         final_c = new_coord if new_coord else curr_coord
@@ -590,6 +592,9 @@ def main():
                                         if b3.form_submit_button("🔄 Reinstate"):
                                             update_task_status(row['id'], "Open", row['staff_remarks'])
                                             st.toast("Restored!"); time.sleep(0.1); st.rerun()
+
+                            # CLOSE WRAPPER
+                            st.markdown('</div>', unsafe_allow_html=True)
 
             else: st.info("👋 No active tasks found.")
 
