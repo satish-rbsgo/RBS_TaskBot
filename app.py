@@ -36,36 +36,6 @@ st.markdown("""
     
     /* Vertical Align Checkbox with Input */
     div[data-testid="stCheckbox"] { margin-top: 28px; }
-
-    /* --- BLINKING FULL LINE ANIMATION --- */
-    @keyframes blink-border-red {
-        0% { border-left: 5px solid transparent; background-color: transparent; }
-        50% { border-left: 5px solid red; background-color: rgba(255, 0, 0, 0.1); }
-        100% { border-left: 5px solid transparent; background-color: transparent; }
-    }
-    @keyframes blink-border-orange {
-        0% { border-left: 5px solid transparent; background-color: transparent; }
-        50% { border-left: 5px solid orange; background-color: rgba(255, 165, 0, 0.1); }
-        100% { border-left: 5px solid transparent; background-color: transparent; }
-    }
-
-    /* Apply blink to containers that we will mark with specific markdown */
-    /* This targets the 'stMarkdown' div we inject to trigger the blink on the sibling expander */
-    
-    .blink-red-box {
-        animation: blink-border-red 1.5s infinite;
-        border-radius: 5px;
-        padding: 2px;
-        margin-bottom: 5px;
-    }
-    
-    .blink-orange-box {
-        animation: blink-border-orange 1.5s infinite;
-        border-radius: 5px;
-        padding: 2px;
-        margin-bottom: 5px;
-    }
-    
 </style>
 """, unsafe_allow_html=True)
 
@@ -278,8 +248,9 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # BLINK TOGGLE
-            enable_blink = st.toggle("Enable Blinking Alerts", value=True)
+            # BLINK TOGGLE - Removed if causing issues, or just rely on simple icons
+            # enable_blink = st.toggle("Enable Blinking Alerts", value=True) 
+            # Reverting complex blink logic to simple icons as requested
             
             menu_options = ["Dashboard", "New Task"] 
             menu_icons = ["journal-bookmark", "plus-circle"]
@@ -493,11 +464,9 @@ def main():
                             except: d_str = "No Date"
                             proj = row.get('project_ref', 'General')
                             
-                            # BLINKING LOGIC
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
-                            # Define Icon
                             icon = "🔵"
                             if "Completed" in selected_filter:
                                 icon = "🟢"
@@ -509,16 +478,6 @@ def main():
                             assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
                             expander_title = f"{icon} {d_str} | {row['task_desc']} ({proj}){assign_label}"
                             
-                            # --- FULL LINE BLINKING IMPLEMENTATION ---
-                            # Wrap the expander in a DIV that animates based on condition
-                            
-                            if enable_blink and is_overdue and "Completed" not in selected_filter:
-                                st.markdown('<div class="blink-red-box">', unsafe_allow_html=True)
-                            elif enable_blink and is_today and "Completed" not in selected_filter:
-                                st.markdown('<div class="blink-orange-box">', unsafe_allow_html=True)
-                            else:
-                                st.markdown('<div>', unsafe_allow_html=True) # Plain div to keep structure
-
                             with st.expander(expander_title):
                                 with st.form(key=f"edit_{row['id']}"):
                                     # COMPACT ROW 1
@@ -530,6 +489,7 @@ def main():
 
                                     # COMPACT ROW 2
                                     c4, c5, c6 = st.columns([3, 3, 3])
+                                    # Project - Edit with Toggle
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     with c4:
@@ -541,6 +501,7 @@ def main():
                                             except: px = 0
                                             new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
                                     
+                                    # Coord - Edit with Toggle
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     with c5:
@@ -552,6 +513,7 @@ def main():
                                             except: cx = 0
                                             new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
 
+                                    # Assignee
                                     if is_manager:
                                         all_users_list = get_active_users()
                                         assign_opts = ["Unassigned"] + all_users_list
@@ -563,11 +525,13 @@ def main():
                                         new_assign = row['assigned_to']
                                         c6.text_input("Assign", value=new_assign, disabled=True, label_visibility="collapsed")
 
+                                    # COMPACT ROW 3
                                     curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
                                     new_rem = st.text_input("Remarks", value=curr_rem, placeholder="Updates...", label_visibility="collapsed")
                                     curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
                                     new_points = st.text_area("Details", value=curr_pts, height=68, label_visibility="collapsed", placeholder="Detailed Points...")
 
+                                    # ACTIONS
                                     b1, b2, b3 = st.columns([1, 2, 1])
                                     if b1.form_submit_button("💾 Save"):
                                         final_c = new_coord if new_coord else curr_coord
@@ -587,8 +551,6 @@ def main():
                                         if b3.form_submit_button("🔄 Reinstate"):
                                             update_task_status(row['id'], "Open", row['staff_remarks'])
                                             st.toast("Restored!"); time.sleep(0.1); st.rerun()
-                            
-                            st.markdown('</div>', unsafe_allow_html=True) # Close the wrapper div
 
             else: st.info("👋 No active tasks found.")
 
