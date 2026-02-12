@@ -288,16 +288,6 @@ def main():
             )
             
             st.divider()
-            st.markdown("**🤖 Assistant**")
-            if st.button("Generate Briefing", use_container_width=True):
-                with st.spinner("Analyzing..."):
-                    q_ai = supabase.table("tasks").select("*").eq("assigned_to", current_user) if not is_manager else supabase.table("tasks").select("*")
-                    resp_ai = q_ai.execute()
-                    df_ai = pd.DataFrame(resp_ai.data) if resp_ai.data else pd.DataFrame()
-                    if not df_ai.empty: st.info(get_ai_summary(df_ai))
-                    else: st.warning("No data.")
-            
-            st.write("") 
             if st.button("Logout", use_container_width=True):
                 st.session_state['logged_in'] = False; st.rerun()
 
