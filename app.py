@@ -37,40 +37,30 @@ st.markdown("""
     /* Vertical Align Checkbox with Input */
     div[data-testid="stCheckbox"] { margin-top: 28px; }
 
-    /* --- BLINKING CONTAINER ANIMATIONS --- */
-    @keyframes pulse-red {
-        0% { border-left: 5px solid #ff4b4b; background-color: rgba(255, 75, 75, 0.1); }
-        50% { border-left: 5px solid transparent; background-color: transparent; }
-        100% { border-left: 5px solid #ff4b4b; background-color: rgba(255, 75, 75, 0.1); }
+    /* --- BLINKING ANIMATION (FOR INSIDE EXPANDER) --- */
+    @keyframes blink-anim {
+        0% { opacity: 1; }
+        50% { opacity: 0.2; }
+        100% { opacity: 1; }
     }
     
-    @keyframes pulse-orange {
-        0% { border-left: 5px solid #ffa500; background-color: rgba(255, 165, 0, 0.1); }
-        50% { border-left: 5px solid transparent; background-color: transparent; }
-        100% { border-left: 5px solid #ffa500; background-color: rgba(255, 165, 0, 0.1); }
-    }
-
-    .blinking-container-red {
-        animation: pulse-red 1.5s infinite;
-        border-radius: 5px;
+    .blink-warning {
+        color: #d32f2f;
+        font-weight: bold;
+        font-size: 16px;
+        animation: blink-anim 1.2s infinite;
         margin-bottom: 10px;
-        padding-right: 5px; /* Slight padding to prevent text cutoff */
+        display: block;
     }
-
-    .blinking-container-orange {
-        animation: pulse-orange 1.5s infinite;
-        border-radius: 5px;
+    
+    .blink-today {
+        color: #ef6c00;
+        font-weight: bold;
+        font-size: 16px;
+        animation: blink-anim 1.2s infinite;
         margin-bottom: 10px;
-        padding-right: 5px;
+        display: block;
     }
-
-    /* Standard container spacing */
-    .normal-container {
-        margin-bottom: 10px;
-        border-left: 5px solid #f0f2f6; /* Grey static border for alignment */
-        padding-right: 5px;
-    }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -503,13 +493,6 @@ def main():
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
-                            # CSS Classes for wrapper
-                            container_class = "normal-container" # default
-                            if enable_blink and "Completed" not in selected_filter:
-                                if is_overdue: container_class = "blinking-container-red"
-                                elif is_today: container_class = "blinking-container-orange"
-
-                            # Icons
                             icon = "🔵"
                             if "Completed" in selected_filter:
                                 icon = "🟢"
@@ -521,10 +504,14 @@ def main():
                             assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
                             expander_title = f"{icon} {d_str} | {row['task_desc']} ({proj}){assign_label}"
                             
-                            # OPEN WRAPPER
-                            st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
-                            
                             with st.expander(expander_title):
+                                # --- INJECT BLINKING ALERT INSIDE ---
+                                if enable_blink and "Completed" not in selected_filter:
+                                    if is_overdue: 
+                                        st.markdown(f'<p class="blink-warning">⚠️ OVERDUE TASK</p>', unsafe_allow_html=True)
+                                    elif is_today: 
+                                        st.markdown(f'<p class="blink-today">⚡ DUE TODAY</p>', unsafe_allow_html=True)
+
                                 with st.form(key=f"edit_{row['id']}"):
                                     # COMPACT ROW 1
                                     c1, c2, c3 = st.columns([5, 2, 2])
@@ -592,9 +579,6 @@ def main():
                                         if b3.form_submit_button("🔄 Reinstate"):
                                             update_task_status(row['id'], "Open", row['staff_remarks'])
                                             st.toast("Restored!"); time.sleep(0.1); st.rerun()
-
-                            # CLOSE WRAPPER
-                            st.markdown('</div>', unsafe_allow_html=True)
 
             else: st.info("👋 No active tasks found.")
 
