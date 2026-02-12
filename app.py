@@ -509,6 +509,41 @@ def main():
                                 elif is_today and "Completed" not in selected_filter:
                                     st.markdown('<div class="alert-text-today">⚡ DUE TODAY - PRIORITY</div>', unsafe_allow_html=True)
 
+                                # --- PROJECT & COORDINATOR EDIT WIDGETS OUTSIDE FORM (INSTANT TOGGLE) ---
+                                curr_proj = row.get('project_ref', 'General')
+                                edit_projs = sorted(list(set(all_projects + [curr_proj])))
+                                curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
+                                edit_coords = sorted(list(set(all_coords + [curr_coord])))
+
+                                pc1, pc2, _ = st.columns([3, 3, 3])
+                                with pc1:
+                                    p_inp_col, p_chk_col = st.columns([5, 1])
+                                    is_new_p = p_chk_col.checkbox("Nw", key=f"np_{row['id']}")
+                                    if is_new_p:
+                                        st.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed", value=curr_proj)
+                                    else:
+                                        try: px = edit_projs.index(curr_proj)
+                                        except: px = 0
+                                        st.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
+
+                                with pc2:
+                                    c_inp_col, c_chk_col = st.columns([5, 1])
+                                    is_new_c = c_chk_col.checkbox("Nw", key=f"nc_{row['id']}")
+                                    if is_new_c:
+                                        st.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed", value=curr_coord)
+                                    else:
+                                        try: cx = edit_coords.index(curr_coord)
+                                        except: cx = 0
+                                        st.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
+
+                                # Capture current values from session_state for use inside the form
+                                use_new_proj = st.session_state.get(f"np_{row['id']}", False)
+                                use_new_coord = st.session_state.get(f"nc_{row['id']}", False)
+                                state_proj_new = st.session_state.get(f"tp_{row['id']}", "").strip()
+                                state_proj_sel = st.session_state.get(f"sp_{row['id']}", curr_proj)
+                                state_coord_new = st.session_state.get(f"tc_{row['id']}", "").strip()
+                                state_coord_sel = st.session_state.get(f"sc_{row['id']}", curr_coord)
+
                                 with st.form(key=f"edit_{row['id']}"):
                                     # COMPACT ROW 1
                                     c1, c2, c3 = st.columns([5, 2, 2])
@@ -517,43 +552,18 @@ def main():
                                     new_prio = c2.selectbox("Prio", ["🔥 High", "⚡ Medium", "🧊 Low"], index=prio_idx, label_visibility="collapsed")
                                     new_date = c3.date_input("Date", value=row['due_date'], label_visibility="collapsed")
 
-                                    # COMPACT ROW 2
-                                    c4, c5, c6 = st.columns([3, 3, 3])
-                                    # Project - Edit with Toggle
-                                    curr_proj = row.get('project_ref', 'General')
-                                    edit_projs = sorted(list(set(all_projects + [curr_proj])))
-                                    with c4:
-                                        p_inp_col, p_chk_col = st.columns([5, 1])
-                                        is_new_p = p_chk_col.checkbox("Nw", key=f"np_{row['id']}")
-                                        if is_new_p: new_proj = p_inp_col.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
-                                        else: 
-                                            try: px = edit_projs.index(curr_proj)
-                                            except: px = 0
-                                            new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
-                                    
-                                    # Coord - Edit with Toggle
-                                    curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
-                                    edit_coords = sorted(list(set(all_coords + [curr_coord])))
-                                    with c5:
-                                        c_inp_col, c_chk_col = st.columns([5, 1])
-                                        is_new_c = c_chk_col.checkbox("Nw", key=f"nc_{row['id']}")
-                                        if is_new_c: new_coord = c_inp_col.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
-                                        else:
-                                            try: cx = edit_coords.index(curr_coord)
-                                            except: cx = 0
-                                            new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
-
                                     # Assignee
+                                    c4, c5, c6 = st.columns([3, 3, 3])
                                     if is_manager:
                                         all_users_list = get_active_users()
                                         assign_opts = ["Unassigned"] + all_users_list
                                         try: ax = assign_opts.index(row['assigned_to'] if row['assigned_to'] else "Unassigned")
                                         except: ax = 0
-                                        new_assign_sel = c6.selectbox("Assign", assign_opts, index=ax, label_visibility="collapsed")
+                                        new_assign_sel = c4.selectbox("Assign", assign_opts, index=ax, label_visibility="collapsed")
                                         new_assign = new_assign_sel if new_assign_sel != "Unassigned" else None
                                     else:
                                         new_assign = row['assigned_to']
-                                        c6.text_input("Assign", value=new_assign, disabled=True, label_visibility="collapsed")
+                                        c4.text_input("Assign", value=new_assign, disabled=True, label_visibility="collapsed")
 
                                     # COMPACT ROW 3
                                     curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
@@ -561,11 +571,15 @@ def main():
                                     curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
                                     new_points = st.text_area("Details", value=curr_pts, height=68, label_visibility="collapsed", placeholder="Detailed Points...")
 
+                                    # Resolve final project/coord values from state
+                                    resolved_proj = state_proj_new if use_new_proj and state_proj_new else state_proj_sel
+                                    resolved_coord = state_coord_new if use_new_coord and state_coord_new else state_coord_sel
+
                                     # ACTIONS
                                     b1, b2, b3 = st.columns([1, 2, 1])
                                     if b1.form_submit_button("💾 Save"):
-                                        final_c = new_coord if new_coord else curr_coord
-                                        final_p = new_proj if new_proj else curr_proj
+                                        final_p = resolved_proj if resolved_proj else curr_proj
+                                        final_c = resolved_coord if resolved_coord else curr_coord
                                         if update_task_full(row['id'], new_desc, new_date, new_prio, new_rem, new_assign, new_points, row['email_subject'], final_c, final_p, is_manager):
                                             st.toast("Saved!"); time.sleep(0.01); st.rerun()
 
