@@ -226,6 +226,10 @@ def update_task_full(task_id, new_desc, new_date, new_prio, new_remarks, new_ass
 
 # --- MAIN APP ---
 def main():
+    # Version banner for quick live verification
+    st.success('RBS TaskHub Version 2.0 Live!', icon='✅')
+    st.balloons()
+
     if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
     if 'user_role' not in st.session_state: st.session_state['user_role'] = None
     if 'user_name' not in st.session_state: st.session_state['user_name'] = None
