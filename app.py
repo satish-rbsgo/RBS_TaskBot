@@ -36,31 +36,23 @@ st.markdown("""
     
     /* Vertical Align Checkbox with Input */
     div[data-testid="stCheckbox"] { margin-top: 28px; }
-
-    /* --- BLINKING ANIMATION (FOR INSIDE EXPANDER) --- */
-    @keyframes blink-anim {
-        0% { opacity: 1; }
-        50% { opacity: 0.2; }
-        100% { opacity: 1; }
-    }
     
-    .blink-warning {
+    /* Alert Text Classes for Inside Form */
+    .alert-text-overdue {
         color: #d32f2f;
-        font-weight: bold;
-        font-size: 16px;
-        animation: blink-anim 1.2s infinite;
-        margin-bottom: 10px;
+        font-weight: 800;
+        font-size: 14px;
+        margin-bottom: 5px;
         display: block;
     }
-    
-    .blink-today {
+    .alert-text-today {
         color: #ef6c00;
-        font-weight: bold;
-        font-size: 16px;
-        animation: blink-anim 1.2s infinite;
-        margin-bottom: 10px;
+        font-weight: 800;
+        font-size: 14px;
+        margin-bottom: 5px;
         display: block;
     }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -272,9 +264,6 @@ def main():
             st.markdown(f"### 💼 RBS Workspace")
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
-            
-            # BLINK TOGGLE
-            enable_blink = st.toggle("Enable Blinking Alerts", value=True)
             
             menu_options = ["Dashboard", "New Task"] 
             menu_icons = ["journal-bookmark", "plus-circle"]
@@ -489,28 +478,35 @@ def main():
                             except: d_str = "No Date"
                             proj = row.get('project_ref', 'General')
                             
-                            # BLINKING LOGIC
+                            # BLINKING LOGIC - Reverted to clean logic
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
+                            # Prefix Alert Text to Title for visibility OUTSIDE
+                            title_prefix = ""
                             icon = "🔵"
+                            
                             if "Completed" in selected_filter:
                                 icon = "🟢"
                             else:
-                                if is_overdue: icon = "🔴"
-                                elif is_today: icon = "🟠"
-                                else: icon = "🔵"
+                                if is_overdue: 
+                                    icon = "🔴"
+                                    title_prefix = "**[OVERDUE]** "
+                                elif is_today: 
+                                    icon = "⚡"
+                                    title_prefix = "**[DUE TODAY]** "
+                                else: 
+                                    icon = "🔵"
 
                             assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
-                            expander_title = f"{icon} {d_str} | {row['task_desc']} ({proj}){assign_label}"
+                            expander_title = f"{icon} {title_prefix}{d_str} | {row['task_desc']} ({proj}){assign_label}"
                             
                             with st.expander(expander_title):
-                                # --- INJECT BLINKING ALERT INSIDE ---
-                                if enable_blink and "Completed" not in selected_filter:
-                                    if is_overdue: 
-                                        st.markdown(f'<p class="blink-warning">⚠️ OVERDUE TASK</p>', unsafe_allow_html=True)
-                                    elif is_today: 
-                                        st.markdown(f'<p class="blink-today">⚡ DUE TODAY</p>', unsafe_allow_html=True)
+                                # VISIBLE ALERT INSIDE
+                                if is_overdue and "Completed" not in selected_filter:
+                                    st.markdown('<div class="alert-text-overdue">⚠️ OVERDUE TASK - ACTION REQUIRED</div>', unsafe_allow_html=True)
+                                elif is_today and "Completed" not in selected_filter:
+                                    st.markdown('<div class="alert-text-today">⚡ DUE TODAY - PRIORITY</div>', unsafe_allow_html=True)
 
                                 with st.form(key=f"edit_{row['id']}"):
                                     # COMPACT ROW 1
@@ -522,6 +518,7 @@ def main():
 
                                     # COMPACT ROW 2
                                     c4, c5, c6 = st.columns([3, 3, 3])
+                                    # Project - Edit with Toggle
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     with c4:
@@ -533,6 +530,7 @@ def main():
                                             except: px = 0
                                             new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
                                     
+                                    # Coord - Edit with Toggle
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     with c5:
@@ -544,6 +542,7 @@ def main():
                                             except: cx = 0
                                             new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
 
+                                    # Assignee
                                     if is_manager:
                                         all_users_list = get_active_users()
                                         assign_opts = ["Unassigned"] + all_users_list
@@ -555,11 +554,13 @@ def main():
                                         new_assign = row['assigned_to']
                                         c6.text_input("Assign", value=new_assign, disabled=True, label_visibility="collapsed")
 
+                                    # COMPACT ROW 3
                                     curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
                                     new_rem = st.text_input("Remarks", value=curr_rem, placeholder="Updates...", label_visibility="collapsed")
                                     curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
                                     new_points = st.text_area("Details", value=curr_pts, height=68, label_visibility="collapsed", placeholder="Detailed Points...")
 
+                                    # ACTIONS
                                     b1, b2, b3 = st.columns([1, 2, 1])
                                     if b1.form_submit_button("💾 Save"):
                                         final_c = new_coord if new_coord else curr_coord
