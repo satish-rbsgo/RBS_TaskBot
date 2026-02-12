@@ -478,27 +478,26 @@ def main():
                             except: d_str = "No Date"
                             proj = row.get('project_ref', 'General')
                             
-                            # BLINKING LOGIC - Reverted to clean logic
+                            # Due-date status flags
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
                             # Prefix Alert Text to Title for visibility OUTSIDE
                             title_prefix = ""
-                            icon = "🔵"
+                            icon = ""
                             
+                            # Completed view keeps its own neutral success icon
                             if "Completed" in selected_filter:
                                 icon = "🟢"
                             else:
+                                # Overdue: Red icon + red [LATE] label
                                 if is_overdue: 
                                     icon = "🔴"
-                                    # Use Streamlit colored text feature for title
-                                    title_prefix = ":red[**[OVR]**] "
+                                    title_prefix = ":red[**[LATE]**] "
+                                # Today: Green lightning + green [NOW] label
                                 elif is_today: 
                                     icon = "⚡"
-                                    # GREEN FOR TODAY
                                     title_prefix = ":green[**[NOW]**] "
-                                else: 
-                                    icon = "🔵"
 
                             assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
                             expander_title = f"{icon} {title_prefix}{d_str} | {row['task_desc']} ({proj}){assign_label}"
