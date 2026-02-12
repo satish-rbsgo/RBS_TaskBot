@@ -491,10 +491,11 @@ def main():
                             else:
                                 if is_overdue: 
                                     icon = "🔴"
-                                    title_prefix = "**[OVERDUE]** "
+                                    # Use Streamlit colored text feature for title
+                                    title_prefix = ":red[**[LATE]**] "
                                 elif is_today: 
                                     icon = "⚡"
-                                    title_prefix = "**[DUE TODAY]** "
+                                    title_prefix = ":orange[**[NOW]**] "
                                 else: 
                                     icon = "🔵"
 
