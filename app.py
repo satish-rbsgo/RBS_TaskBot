@@ -38,28 +38,36 @@ st.markdown("""
     div[data-testid="stCheckbox"] { margin-top: 28px; }
 
     /* --- BLINKING ANIMATION --- */
-    @keyframes blink-red {
-        0% { color: #d32f2f; opacity: 1; }
-        50% { color: #d32f2f; opacity: 0.4; }
-        100% { color: #d32f2f; opacity: 1; }
+    @keyframes blink-red-bg {
+        0% { background-color: rgba(255, 0, 0, 0.1); border-color: red; }
+        50% { background-color: rgba(255, 0, 0, 0.0); border-color: transparent; }
+        100% { background-color: rgba(255, 0, 0, 0.1); border-color: red; }
     }
-    @keyframes blink-orange {
-        0% { color: #ef6c00; opacity: 1; }
-        50% { color: #ef6c00; opacity: 0.4; }
-        100% { color: #ef6c00; opacity: 1; }
+    @keyframes blink-orange-bg {
+        0% { background-color: rgba(255, 165, 0, 0.1); border-color: orange; }
+        50% { background-color: rgba(255, 165, 0, 0.0); border-color: transparent; }
+        100% { background-color: rgba(255, 165, 0, 0.1); border-color: orange; }
+    }
+
+    /* Target the Expander Header based on content (Alert Icons) */
+    /* Note: Streamlit class names are dynamic, but we can try targeting known structures */
+    div[data-testid="stExpander"] > details > summary:has(span:contains("🔴")) {
+        animation: blink-red-bg 1.5s infinite;
+        border: 1px solid red;
     }
     
-    /* Classes to be applied via Markdown */
-    .blink-overdue {
-        animation: blink-red 1.2s infinite ease-in-out;
-        font-weight: bold;
-        color: #d32f2f;
+    div[data-testid="stExpander"] > details > summary:has(span:contains("🟠")) {
+        animation: blink-orange-bg 1.5s infinite;
+        border: 1px solid orange;
     }
-    .blink-today {
-        animation: blink-orange 1.2s infinite ease-in-out;
-        font-weight: bold;
-        color: #ef6c00;
-    }
+
+    /* Fallback for simple text color blinking if :has not supported */
+    .blink-text-red { animation: blink-text-red-anim 1s infinite; color: red !important; font-weight: bold; }
+    .blink-text-orange { animation: blink-text-orange-anim 1s infinite; color: orange !important; font-weight: bold; }
+
+    @keyframes blink-text-red-anim { 50% { opacity: 0.5; } }
+    @keyframes blink-text-orange-anim { 50% { opacity: 0.5; } }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -488,91 +496,72 @@ def main():
                             except: d_str = "No Date"
                             proj = row.get('project_ref', 'General')
                             
-                            # BLINKING LOGIC - Applying to the WHOLE string by wrapping in span with class
+                            # BLINKING LOGIC
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
-                            # Default standard label
-                            assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
+                            # To make the whole line "feel" like it's blinking/alerting, we use a dynamic icon
+                            # NOTE: Streamlit expander labels CANNOT natively accept HTML.
                             
-                            # Determine Icon and Blink Class
+                            # CSS HACK: We will create a blinking dot inside the label using standard text emojis if possible
+                            # BUT to get the "Entire Line" feel, we added the :has selector in CSS above.
+                            # We just need to make sure the TRIGGER characters are in the label.
+                            
                             icon = "🔵"
-                            label_class = "" # Default none
-                            
                             if "Completed" in selected_filter:
                                 icon = "🟢"
                             else:
-                                if is_overdue: 
-                                    icon = "🔴"
-                                    if enable_blink: label_class = "blink-overdue"
-                                elif is_today: 
-                                    icon = "🟠"
-                                    if enable_blink: label_class = "blink-today"
-                            
-                            # Construct the label string.
-                            # NOTE: Streamlit expander labels CANNOT natively accept HTML.
-                            # We MUST trick it using the 'help' tooltip or stick to icons in the label.
-                            # BUT, to make the *text* blink, we can try to inject HTML if streamlit version allows,
-                            # or we rely on the CONTENT inside being the blinker.
-                            
-                            # Let's try to inject the class wrapper around the text.
-                            # Streamlit might escape this, but let's try the markdown injection for the label if possible.
-                            # Standard streamlit.expander(label) treats label as plain text/emoji.
-                            
-                            # WORKAROUND: We will stick to the Icon + Text.
-                            # Since we can't style the expander header directly, we will rely on the "Blinking Dot" logic inside 
-                            # OR we accept that only the CONTENT can blink.
-                            
-                            # However, user insisted on "Entire Line".
-                            # The best approximation without hacking Streamlit JS is to use the `label` as standard,
-                            # but inject a highly visible Alert Block *immediately* inside.
+                                if enable_blink and is_overdue: icon = "🔴" # CSS will catch this '🔴'
+                                elif enable_blink and is_today: icon = "🟠" # CSS will catch this '🟠'
+                                else:
+                                    if is_overdue: icon = "🔴"
+                                    elif is_today: icon = "🟠"
+                                    else: icon = "🔵"
+
+                            assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
                             
                             expander_label = f"{icon} {d_str} | {row['task_desc']} ({proj}){assign_label}"
                             
-                            # Applying the class to a markdown element ABOVE the expander? No, breaks flow.
-                            # We will rely on the CSS classes defined above `blink-overdue` and `blink-today` 
-                            # applied to a div *inside* the expander that mimics the header if we can't style the header.
-                            
-                            # Actually, let's try to apply the style to the text inside the expander as a 'Header' replacement.
-                            
                             with st.expander(expander_label):
-                                # INJECT BLINKING HEADER INSIDE
-                                if enable_blink and is_overdue and "Completed" not in selected_filter:
-                                     st.markdown(f'<div class="blink-overdue">⚠️ OVERDUE: {row["task_desc"]}</div>', unsafe_allow_html=True)
-                                elif enable_blink and is_today and "Completed" not in selected_filter:
-                                     st.markdown(f'<div class="blink-today">⚡ DUE TODAY: {row["task_desc"]}</div>', unsafe_allow_html=True)
-
                                 with st.form(key=f"edit_{row['id']}"):
-                                    # ... (Rest of form remains identical) ...
+                                    # COMPACT ROW 1
                                     c1, c2, c3 = st.columns([5, 2, 2])
                                     new_desc = c1.text_input("Desc", value=row['task_desc'], label_visibility="collapsed", placeholder="Task Description")
                                     prio_idx = ["🔥 High", "⚡ Medium", "🧊 Low"].index(row['priority']) if row['priority'] in ["🔥 High", "⚡ Medium", "🧊 Low"] else 1
                                     new_prio = c2.selectbox("Prio", ["🔥 High", "⚡ Medium", "🧊 Low"], index=prio_idx, label_visibility="collapsed")
                                     new_date = c3.date_input("Date", value=row['due_date'], label_visibility="collapsed")
 
+                                    # COMPACT ROW 2
                                     c4, c5, c6 = st.columns([3, 3, 3])
+                                    # Project - Edit with Toggle
                                     curr_proj = row.get('project_ref', 'General')
                                     edit_projs = sorted(list(set(all_projects + [curr_proj])))
                                     with c4:
                                         p_inp_col, p_chk_col = st.columns([5, 1])
-                                        is_new_p = p_chk_col.checkbox("Nw", key=f"np_{row['id']}")
-                                        if is_new_p: new_proj = p_inp_col.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
-                                        else: 
-                                            try: px = edit_projs.index(curr_proj)
-                                            except: px = 0
-                                            new_proj = p_inp_col.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
+                                        with p_chk_col:
+                                            is_new_p = st.checkbox("Nw", key=f"np_{row['id']}")
+                                        with p_inp_col:
+                                            if is_new_p: new_proj = st.text_input("Proj", key=f"tp_{row['id']}", label_visibility="collapsed")
+                                            else: 
+                                                try: px = edit_projs.index(curr_proj)
+                                                except: px = 0
+                                                new_proj = st.selectbox("Proj", edit_projs, index=px, key=f"sp_{row['id']}", label_visibility="collapsed")
                                     
+                                    # Coord - Edit with Toggle
                                     curr_coord = row.get('coordinator', '') if pd.notna(row.get('coordinator')) else "General"
                                     edit_coords = sorted(list(set(all_coords + [curr_coord])))
                                     with c5:
                                         c_inp_col, c_chk_col = st.columns([5, 1])
-                                        is_new_c = c_chk_col.checkbox("Nw", key=f"nc_{row['id']}")
-                                        if is_new_c: new_coord = c_inp_col.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
-                                        else:
-                                            try: cx = edit_coords.index(curr_coord)
-                                            except: cx = 0
-                                            new_coord = c_inp_col.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
+                                        with c_chk_col:
+                                            is_new_c = st.checkbox("Nw", key=f"nc_{row['id']}")
+                                        with c_inp_col:
+                                            if is_new_c: new_coord = st.text_input("Coord", key=f"tc_{row['id']}", label_visibility="collapsed")
+                                            else:
+                                                try: cx = edit_coords.index(curr_coord)
+                                                except: cx = 0
+                                                new_coord = st.selectbox("Coord", edit_coords, index=cx, key=f"sc_{row['id']}", label_visibility="collapsed")
 
+                                    # Assignee
                                     if is_manager:
                                         all_users_list = get_active_users()
                                         assign_opts = ["Unassigned"] + all_users_list
@@ -584,11 +573,13 @@ def main():
                                         new_assign = row['assigned_to']
                                         c6.text_input("Assign", value=new_assign, disabled=True, label_visibility="collapsed")
 
+                                    # COMPACT ROW 3
                                     curr_rem = row['staff_remarks'] if row['staff_remarks'] else ""
                                     new_rem = st.text_input("Remarks", value=curr_rem, placeholder="Updates...", label_visibility="collapsed")
                                     curr_pts = row.get('points', '') if pd.notna(row.get('points')) else ""
                                     new_points = st.text_area("Details", value=curr_pts, height=68, label_visibility="collapsed", placeholder="Detailed Points...")
 
+                                    # ACTIONS
                                     b1, b2, b3 = st.columns([1, 2, 1])
                                     if b1.form_submit_button("💾 Save"):
                                         final_c = new_coord if new_coord else curr_coord
