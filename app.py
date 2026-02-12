@@ -38,41 +38,16 @@ st.markdown("""
     div[data-testid="stCheckbox"] { margin-top: 28px; }
 
     /* --- BLINKING ANIMATION --- */
-    @keyframes blink-red {
-        0% { opacity: 1; }
-        50% { opacity: 0.4; }
-        100% { opacity: 1; }
-    }
-    @keyframes blink-orange {
-        0% { opacity: 1; }
-        50% { opacity: 0.4; }
-        100% { opacity: 1; }
+    @keyframes blink-text {
+        0% { opacity: 1; color: inherit; }
+        50% { opacity: 0.5; color: red; }
+        100% { opacity: 1; color: inherit; }
     }
     
-    .blink-dot-red {
-        height: 10px; width: 10px;
-        background-color: red;
-        border-radius: 50%;
-        display: inline-block;
-        animation: blink-red 1.5s infinite;
-        margin-right: 8px;
-    }
-    
-    .blink-dot-orange {
-        height: 10px; width: 10px;
-        background-color: orange;
-        border-radius: 50%;
-        display: inline-block;
-        animation: blink-orange 1.5s infinite;
-        margin-right: 8px;
-    }
-    
-    .static-dot {
-        height: 10px; width: 10px;
-        background-color: #ccc;
-        border-radius: 50%;
-        display: inline-block;
-        margin-right: 8px;
+    /* We can't easily style the parent expander, but we can style content we inject */
+    .blink-mode {
+        animation: blink-text 1s infinite;
+        font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -506,40 +481,30 @@ def main():
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
-                            icon_html = ""
+                            blink_class = ""
+                            if enable_blink and "Completed" not in selected_filter:
+                                if is_overdue: blink_class = "blink-dot-red" # Reusing animation for dot as label prefix
+                                elif is_today: blink_class = "blink-dot-orange"
+
+                            # To make the whole line "feel" like it's blinking/alerting, we use a dynamic icon
                             if "Completed" in selected_filter:
-                                icon_html = "🟢"
+                                icon = "🟢"
                             else:
-                                if enable_blink and is_overdue:
-                                    icon_html = '<span class="blink-dot-red"></span>'
-                                elif enable_blink and is_today:
-                                    icon_html = '<span class="blink-dot-orange"></span>'
-                                else:
-                                    # Static Icons if blink disabled or future task
-                                    if is_overdue: icon_html = "🔴"
-                                    elif is_today: icon_html = "🟠"
-                                    else: icon_html = "🔵"
+                                if is_overdue: icon = "🔴" 
+                                elif is_today: icon = "🟠" 
+                                else: icon = "🔵"
 
                             assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
                             
-                            # Using HTML in Expander Label is tricky, Streamlit doesn't support raw HTML in expander title directly.
-                            # Workaround: Use Emoji for expander title, but the blink effect works best in the body or standard text.
-                            # For expander title, we stick to Emojis but add "⚠️" for alerts.
+                            # EXPANDER TITLE
+                            expander_title = f"{icon} **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"
                             
-                            # However, to get the blink effect, we can inject it into the first column of the form? 
-                            # No, the expander title is key.
-                            # Let's stick to standard Emojis for the Title (Streamlit constraint) but add dynamic icons.
-                            
-                            # Alert Logic for Title
-                            alert_icon = "🔴" if is_overdue else "🟠" if is_today else "🔵"
-                            if "Completed" in selected_filter: alert_icon = "🟢"
-                            
-                            with st.expander(f"{alert_icon}  **{d_str}** | {row['task_desc']} _({proj}){assign_label}_"):
-                                
-                                # Show Blinking Dot INSIDE if enabled
-                                if enable_blink and "Completed" not in selected_filter:
-                                    if is_overdue: st.markdown(f'<span class="blink-dot-red"></span> **Overdue!**', unsafe_allow_html=True)
-                                    elif is_today: st.markdown(f'<span class="blink-dot-orange"></span> **Due Today!**', unsafe_allow_html=True)
+                            with st.expander(expander_title):
+                                # INJECT BLINKING TEXT INSIDE if needed
+                                if enable_blink and is_overdue and "Completed" not in selected_filter:
+                                     st.markdown(f":red[**⚠️ OVERDUE - ATTENTION REQUIRED**]", help="This task is past due date.")
+                                elif enable_blink and is_today and "Completed" not in selected_filter:
+                                     st.markdown(f":orange[**⚡ DUE TODAY**]", help="This task is due today.")
 
                                 with st.form(key=f"edit_{row['id']}"):
                                     # COMPACT ROW 1
