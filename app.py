@@ -36,6 +36,37 @@ st.markdown("""
     
     /* Vertical Align Checkbox with Input */
     div[data-testid="stCheckbox"] { margin-top: 28px; }
+
+    /* --- BLINKING ANIMATION FOR DOTS --- */
+    @keyframes blink-opacity {
+        0% { opacity: 1; }
+        50% { opacity: 0.2; }
+        100% { opacity: 1; }
+    }
+    
+    /* We can't style emojis directly in expander title easily, so we use a span in markdown body 
+       OR we just accept standard emojis. 
+       BUT user wants the DOT to blink. 
+       Streamlit expander titles treat HTML as text. 
+       So we revert to:
+       1. Standard Emoji in Title.
+       2. Blinking Warning INSIDE the expander (Top Line).
+       
+       Wait, the user asked for the *BUTTON/ICON* to blink.
+       If we can't blink the expander title icon, we can put a blinking icon *inside* the body.
+    */
+    
+    .blink-warning {
+        color: red;
+        font-weight: bold;
+        animation: blink-opacity 1s infinite;
+    }
+    .blink-today {
+        color: orange;
+        font-weight: bold;
+        animation: blink-opacity 1s infinite;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -248,9 +279,8 @@ def main():
             role_label = "Manager" if is_manager else "Team Member"
             st.caption(f"{user_name} ({role_label})")
             
-            # BLINK TOGGLE - Removed if causing issues, or just rely on simple icons
-            # enable_blink = st.toggle("Enable Blinking Alerts", value=True) 
-            # Reverting complex blink logic to simple icons as requested
+            # BLINK TOGGLE
+            enable_blink = st.toggle("Enable Blinking Alerts", value=True)
             
             menu_options = ["Dashboard", "New Task"] 
             menu_icons = ["journal-bookmark", "plus-circle"]
@@ -464,9 +494,11 @@ def main():
                             except: d_str = "No Date"
                             proj = row.get('project_ref', 'General')
                             
+                            # BLINKING LOGIC
                             is_today = (row['due_date'] == today_ts)
                             is_overdue = (row['due_date'] < today_ts)
                             
+                            # Revert to standard Icon assignment
                             icon = "🔵"
                             if "Completed" in selected_filter:
                                 icon = "🟢"
@@ -478,7 +510,14 @@ def main():
                             assign_label = f" ➝ {row['assigned_to'].split('@')[0].title()}" if (is_manager and row['assigned_to']) else ""
                             expander_title = f"{icon} {d_str} | {row['task_desc']} ({proj}){assign_label}"
                             
+                            # Standard Expander (No Wrapping Divs)
                             with st.expander(expander_title):
+                                # INJECT BLINKING ALERT TEXT INSIDE
+                                if enable_blink and is_overdue and "Completed" not in selected_filter:
+                                     st.markdown(f'<div class="blink-warning">⚠️ OVERDUE TASK</div>', unsafe_allow_html=True)
+                                elif enable_blink and is_today and "Completed" not in selected_filter:
+                                     st.markdown(f'<div class="blink-today">⚡ DUE TODAY</div>', unsafe_allow_html=True)
+
                                 with st.form(key=f"edit_{row['id']}"):
                                     # COMPACT ROW 1
                                     c1, c2, c3 = st.columns([5, 2, 2])
